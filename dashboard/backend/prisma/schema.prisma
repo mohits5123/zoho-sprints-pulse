@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  zohoId    String   @unique
+  name      String
+  email     String?
+  role      String   @default("OTHER")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  zohoId      String   @unique
+  name        String
+  prefix      String?
+  status      String   @default("active")
+  boardType   String   @default("scrum")
+  description String?
+  ownerName   String?
+  ownerZohoId String?
+  createdTime String?
+  backlogCount Int?
+  displayOrder Int      @default(0)
+  hidden       Boolean  @default(false)
+  statusBreakdown String?
+  statusGroups    String?
+  statusMap       String? // cached StatusMapResult JSON: { map, orderedNames, statusGroups }
+  rawData     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Sprint {
+  id              String   @id @default(cuid())
+  zohoId          String
+  projectZohoId   String
+  projectName     String
+  name            String
+  status          String   @default("active")
+  startDate       String?
+  endDate         String?
+  totalTickets    Int      @default(0)
+  statusBreakdown String?
+  rawData         String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([zohoId, projectZohoId])
+}
+
+model Epic {
+  id            String   @id @default(cuid())
+  zohoId        String
+  projectZohoId String
+  name          String
+  syncedAt      DateTime @default(now()) @updatedAt
+
+  @@unique([zohoId, projectZohoId])
+}
+
+model Issue {
+  id             String   @id @default(cuid())
+  zohoId         String
+  sprintZohoId   String
+  projectZohoId  String
+  itemNo         String
+  title          String
+  status         String
+  statusGroup    String              // "todo" | "doing" | "done"
+  epicZohoId     String?
+  creatorZohoId  String?
+  assigneeIds    String              // JSON array: ["zohoId1", "zohoId2"]
+  createdAt      String?             // Zoho creation timestamp (ISO string)
+  endDate        String?             // Target date (ISO string)
+  syncedAt       DateTime @default(now()) @updatedAt
+
+  @@unique([zohoId, sprintZohoId])
+}
+
+model Settings {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model BurndownSnapshot {
+  sprintZohoId String
+  date         String  // YYYY-MM-DD
+  doneCount    Int
+  totalCount   Int
+
+  @@id([sprintZohoId, date])
+}

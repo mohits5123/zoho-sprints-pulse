@@ -1,0 +1,310 @@
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { fetchIssues, fetchProject, fetchAppConfig, type IssueItem } from '../api/client';
+import { UserAvatar } from '../components/UserAvatar';
+
+type StatusGroup = 'todo' | 'doing' | 'done' | 'unknown';
+
+const GROUP_COLORS: Record<string, string> = {
+  todo:    '#64748b',
+  doing:   '#3b82f6',
+  done:    '#22c55e',
+  unknown: '#94a3b8',
+};
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' });
+}
+
+export function IssueListPage() {
+  const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  const sprintId   = searchParams.get('sprintId')    ?? '';
+  const epicId     = searchParams.get('epicId')       ?? undefined;
+  const status     = searchParams.get('status')       ?? undefined;
+  const statusGroup = searchParams.get('statusGroup') ?? undefined;
+  const userId     = searchParams.get('userId')       ?? undefined;
+  const userName   = searchParams.get('userName')     ?? '';
+  const stale      = searchParams.get('stale') === 'true';
+  const staleDays  = parseInt(searchParams.get('staleDays') ?? '7', 10) || 7;
+  const creatorOnly = searchParams.get('creatorOnly') === 'true';
+  const sprintName = searchParams.get('sprintName')   ?? '';
+  const epicName   = searchParams.get('epicName')     ?? '';
+  const watchedStates = searchParams.get('watchedStates')
+    ? searchParams.get('watchedStates')!.split(',').map(s => s.trim()).filter(Boolean)
+    : [];
+
+  const [issues, setIssues]         = useState<IssueItem[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState<string | null>(null);
+  const [copied, setCopied]         = useState<string | null>(null);
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [projNo, setProjNo]         = useState('');
+
+  // Fetch workspace name and projNo independently (not from URL params)
+  useEffect(() => {
+    fetchAppConfig().then(({ workspaceName: wn }) => setWorkspaceName(wn)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!projectId) return;
+    fetchProject(projectId).then(({ project }) => {
+      if (project.projNo) setProjNo(project.projNo);
+    }).catch(() => {});
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId || !sprintId) return;
+    setLoading(true);
+    fetchIssues(projectId, sprintId, { status, statusGroup, epicId, userId, creatorOnly, stale, staleDays, watchedStates })
+      .then(({ issues: data }) => {
+        const ORDER: Record<string, number> = { todo: 0, doing: 1, done: 2 };
+        setIssues(data.sort((a, b) => (ORDER[a.statusGroup] ?? 1) - (ORDER[b.statusGroup] ?? 1)));
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [projectId, sprintId, status, epicId, userId, creatorOnly, stale, staleDays]);
+
+  function copyItemUrl(url: string, itemNo: string) {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(itemNo);
+      setTimeout(() => setCopied(null), 1500);
+    });
+  }
+
+  // Page title
+  const GROUP_DISPLAY: Record<string, string> = { todo: 'Todo', doing: 'In Progress', done: 'Done' };
+  const title = creatorOnly && userName
+    ? `Tickets raised by ${userName}`
+    : userId && userName
+    ? `${userName}'s issues`
+    : stale
+    ? `Stale tickets (${staleDays}+ days)`
+    : statusGroup
+    ? `${GROUP_DISPLAY[statusGroup] ?? statusGroup} issues`
+    : status ?? 'All issues';
+
+  const subtitle = [
+    sprintName && `Sprint: ${sprintName}`,
+    epicName   && `Epic: ${epicName}`,
+  ].filter(Boolean).join('  ·  ');
+
+  return (
+    <div style={s.page}>
+      <header style={s.header}>
+        <div style={s.headerLeft}>
+          <button style={s.back} onClick={() => navigate(-1)}>← Back</button>
+          <div>
+            <h1 style={s.title}>{title}</h1>
+            {subtitle && <p style={s.subtitle}>{subtitle}</p>}
+          </div>
+        </div>
+        {!loading && <span style={s.count}>{issues.length} issue{issues.length !== 1 ? 's' : ''}</span>}
+      </header>
+
+      {loading && <p style={s.muted}>Loading issues…</p>}
+      {error   && <p style={s.err}>Error: {error}</p>}
+
+      {!loading && !error && issues.length === 0 && (
+        <p style={s.muted}>No issues match this filter.</p>
+      )}
+
+      {!loading && issues.length > 0 && (
+        <div style={s.list}>
+          {/* Column headers */}
+          <div style={s.colHeader}>
+            <span style={{ ...s.col, ...s.colId }}>ID</span>
+            <span style={{ ...s.col, flex: 1 }}>Title</span>
+            <span style={{ ...s.col, ...s.colStatus }}>Status</span>
+            <span style={{ ...s.col, ...s.colUser }}>Creator</span>
+            <span style={{ ...s.col, ...s.colUser }}>Assignee</span>
+            <span style={{ ...s.col, ...s.colDate }}>Created</span>
+            <span style={{ ...s.col, ...s.colDelay }}>Delayed</span>
+          </div>
+
+          {issues.map((issue) => (
+            <IssueRow
+              key={issue.zohoId}
+              issue={issue}
+              staleDays={staleDays}
+              watchedStates={watchedStates}
+              workspaceName={workspaceName}
+              projNo={projNo}
+              copied={copied}
+              onCopy={copyItemUrl}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IssueRow({
+  issue,
+  staleDays,
+  watchedStates,
+  workspaceName,
+  projNo,
+  copied,
+  onCopy,
+}: {
+  issue: IssueItem;
+  staleDays: number;
+  watchedStates: string[];
+  workspaceName: string;
+  projNo: string;
+  copied: string | null;
+  onCopy: (url: string, itemNo: string) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const dotColor = GROUP_COLORS[issue.statusGroup as StatusGroup] ?? '#94a3b8';
+
+  // Match the stale card logic exactly:
+  // - Only show age if the issue's status is in watchedStates (or no watchedStates configured)
+  // - Highlight red when age > staleDays and state is watched
+  const ticketAge = issue.createdAt
+    ? Math.floor((Date.now() - new Date(issue.createdAt).getTime()) / 86400000)
+    : NaN;
+  const age = !isNaN(ticketAge) && ticketAge >= 0 ? ticketAge : 0;
+
+  // Determine if this issue's state is being watched for staleness
+  const isWatchedState = watchedStates.length === 0
+    ? issue.statusGroup !== 'done'
+    : watchedStates.includes(issue.status);
+  const isStaleByThreshold = isWatchedState && age > staleDays;
+
+  const zohoUrl = workspaceName && projNo
+    ? `https://sprints.zoho.in/workspace/${workspaceName}#P${projNo}/itemdetails/I${issue.itemNo}`
+    : null;
+
+  return (
+    <div
+      style={{
+        ...s.row,
+        backgroundColor: hovered ? '#1e293b' : 'transparent',
+        cursor: zohoUrl ? 'pointer' : 'default',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={zohoUrl ? () => window.open(zohoUrl, '_blank', 'noopener,noreferrer') : undefined}
+    >
+      {/* ID */}
+      <div style={{ ...s.col, ...s.colId, display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ ...s.itemNo, color: zohoUrl && hovered ? '#60a5fa' : undefined }}>#{issue.itemNo}</span>
+        <button
+          style={{
+            ...s.copyBtn,
+            opacity: hovered ? 1 : 0,
+            color: copied === issue.itemNo ? '#22c55e' : '#64748b',
+          }}
+          onClick={(e) => { e.stopPropagation(); onCopy(zohoUrl ?? `#${issue.itemNo}`, issue.itemNo); }}
+          title={zohoUrl ? 'Copy Zoho URL' : 'Copy issue ID'}
+        >
+          {copied === issue.itemNo ? '✓' : '⧉'}
+        </button>
+      </div>
+
+      {/* Title */}
+      <span style={{ ...s.col, flex: 1, color: '#e2e8f0', fontSize: 13 }}>{issue.title}</span>
+
+      {/* Status */}
+      <div style={{ ...s.col, ...s.colStatus, display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: dotColor, flexShrink: 0, display: 'inline-block' }} />
+        <span style={{ fontSize: 12, color: '#94a3b8', whiteSpace: 'nowrap' as const }}>{issue.status}</span>
+      </div>
+
+      {/* Creator */}
+      <div style={{ ...s.col, ...s.colUser }}>
+        {issue.creator
+          ? <UserAvatar name={issue.creator.name} role={issue.creator.role} size={24} />
+          : <span style={s.dash}>—</span>}
+      </div>
+
+      {/* Assignees */}
+      <div style={{ ...s.col, ...s.colUser, display: 'flex', gap: 3, flexWrap: 'wrap' as const }}>
+        {issue.assignees.length > 0
+          ? issue.assignees.map((a) => <UserAvatar key={a.id} name={a.name} role={a.role} size={24} />)
+          : <span style={s.dash}>—</span>}
+      </div>
+
+      {/* Created */}
+      <span style={{ ...s.col, ...s.colDate }}>{fmtDate(issue.createdAt)}</span>
+
+      {/* Age — only show when state is watched, red when over stale threshold */}
+      {isWatchedState && (
+        <span style={{
+          ...s.col, ...s.colDelay,
+          color: isStaleByThreshold ? '#ef4444' : '#64748b',
+          fontWeight: isStaleByThreshold ? 600 : 400,
+        }}>
+          {age > 0 ? `${age}d` : '—'}
+        </span>
+      )}
+      {!isWatchedState && (
+        <span style={{ ...s.col, ...s.colDelay, color: '#334155', fontSize: 11, fontStyle: 'italic' }}>
+          n/a
+        </span>
+      )}
+    </div>
+  );
+}
+
+const s: Record<string, React.CSSProperties> = {
+  page: {
+    minHeight: '100vh', backgroundColor: '#0f172a', color: '#e2e8f0',
+    padding: '0 24px 48px', fontFamily: 'system-ui, sans-serif',
+  },
+  header: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '32px 0 40px', borderBottom: '1px solid #1e293b', marginBottom: 32,
+  },
+  headerLeft: { display: 'flex', alignItems: 'center', gap: 20 },
+  back: {
+    backgroundColor: '#1e293b', border: '1px solid #334155',
+    borderRadius: 8, padding: '7px 13px',
+    color: '#94a3b8', fontSize: 13, fontWeight: 600,
+    cursor: 'pointer', userSelect: 'none' as const,
+  },
+  title:    { margin: 0, fontSize: 28, fontWeight: 700, color: '#f1f5f9' },
+  subtitle: { margin: '4px 0 0', fontSize: 14, color: '#64748b' },
+  count:    { fontSize: 13, color: '#64748b' },
+  muted:    { color: '#64748b', fontSize: 14, marginTop: 40, textAlign: 'center' as const },
+  err:      { color: '#f87171', fontSize: 14, marginTop: 40, textAlign: 'center' as const },
+  list: {
+    border: '1px solid #1e293b', borderRadius: 10, overflow: 'hidden',
+  },
+  colHeader: {
+    display: 'flex', alignItems: 'center',
+    padding: '10px 16px', backgroundColor: '#1e293b',
+    borderBottom: '1px solid #334155',
+  },
+  col:      { display: 'flex', alignItems: 'center', flexShrink: 0 },
+  colId:    { width: 80 },
+  colStatus:{ width: 140 },
+  colUser:  { width: 80, justifyContent: 'center' as const },
+  colDate:  { width: 100, fontSize: 12, color: '#64748b', justifyContent: 'flex-end' as const },
+  colDelay: { width: 72, justifyContent: 'flex-end' as const, fontSize: 12 },
+  row: {
+    display: 'flex', alignItems: 'center',
+    padding: '10px 16px',
+    borderBottom: '1px solid #1a2540',
+    transition: 'background-color 0.1s',
+    cursor: 'default',
+  },
+  itemNo: {
+    fontSize: 12, fontWeight: 600, color: '#64748b',
+    fontFamily: 'monospace',
+  },
+  copyBtn: {
+    background: 'none', border: 'none', cursor: 'pointer',
+    fontSize: 16, padding: '0 3px', lineHeight: 1,
+    transition: 'opacity 0.15s, color 0.15s',
+  },
+  dash: { fontSize: 13, color: '#334155' },
+};
