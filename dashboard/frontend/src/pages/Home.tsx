@@ -1,3 +1,26 @@
+/**
+ * Home/Dashboard page component.
+ *
+ * Landing page showing connection status, sync controls, and quick navigation to main sections:
+ * - Team: View all team members (synced from Zoho)
+ * - Pods: View all projects (synced from Zoho)
+ * - Sprint Health: View active sprint status (synced from Zoho)
+ * - Zoho Connection: Display connection details and token expiry
+ *
+ * Features:
+ * - 3-column card grid for Team, Pods, and Sprint Health
+ * - Each card shows count of synced items and resync button
+ * - Clickable cards navigate to respective pages (when data synced)
+ * - Independent sync buttons for each section
+ * - Zoho connection details card at bottom
+ * - Connection status badge in header
+ *
+ * Data flows:
+ * - Status (Zoho connection) fetched on mount
+ * - User/project/sprint counts fetched from local SQLite
+ * - Sync operations are fire-and-forget (background on server)
+ * - Counts update after sync completes
+ */
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchStatus, fetchUsers, syncUsers, fetchProjects, syncProjects, fetchSprints, syncSprints, StatusResponse } from '../api/client';

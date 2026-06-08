@@ -6,6 +6,12 @@ function initials(name: string) {
   return name.split(' ').map((w) => w[0] ?? '').join('').slice(0, 2).toUpperCase();
 }
 
+/**
+ * Status indicator dot with count and label
+ * @param color Hex color string for the dot indicator
+ * @param count Number of items in this status
+ * @param label Status label shown in tooltip
+ */
 function StatusDot({ color, count, label }: { color: string; count: number; label: string }) {
   return (
     <span title={`${count} ${label}`} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>

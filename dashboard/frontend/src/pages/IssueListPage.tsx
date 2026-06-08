@@ -1,3 +1,29 @@
+/**
+ * Issue list page component.
+ *
+ * Displays a filtered and paginated list of issues (tickets) from a specific project (and optional sprint).
+ * Supports filtering by status, status group (todo/doing/done), creator, assignee, staleness, and watched states.
+ *
+ * Features:
+ * - Issue list with columns: ID, Title, Status, Creator, Assignee, Created, Delayed/Age
+ * - Filters via URL query parameters (sprintId, status, statusGroup, userId, stale, staleDays, etc.)
+ * - Click to open in Zoho Sprints (if URL available)
+ * - Copy issue ID or Zoho URL to clipboard
+ * - Dynamic title based on filter context (e.g., "Stale tickets", "John's issues")
+ *
+ * Features:
+ * - Issue list with columns: ID, Title, Status, Creator, Assignee, Created, Delayed/Age
+ * - Filters via URL query parameters (sprintId, status, statusGroup, userId, stale, staleDays, etc.)
+ * - Click to open in Zoho Sprints (if URL available)
+ * - Copy issue ID or Zoho URL to clipboard
+ * - Dynamic title based on filter context (e.g., "Stale tickets", "John's issues")
+ * - Staleness calculation: age in days, highlighted red if over threshold and in watched state
+ * - Watched states: by default all non-done statuses; can be customized per project
+ *
+ * Data flows:
+ * - Issues are fetched from local SQLite via backend query layer
+ * - Workspace name and project number are cached from app config
+ */
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { fetchIssues, fetchProject, fetchAppConfig, type IssueItem } from '../api/client';

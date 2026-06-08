@@ -25,7 +25,16 @@ prisma/dev.db
 # OS files
 Thumbs.db
 
+#llm stuff
 CLAUDE.md 
 DB_REVIEW.md
 .github
+
+# Documentation guidelines (reference file)
+docs/documentation-guidelines.md
+
+#scripts
+document.sh
+review.sh
+staged-review-report.txt
 

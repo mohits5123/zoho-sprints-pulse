@@ -1,8 +1,17 @@
-type Props = {
+/**
+ * Props for StatusBadge component
+ * @param connected Connection status: null=checking, true=connected, false=disconnected
+ */
+interface StatusBadgeProps {
   connected: boolean | null;
-};
+}
 
-export function StatusBadge({ connected }: Props) {
+/**
+ * Status badge showing connection status with color-coded indicator
+ * @param connected Connection status
+ * @returns Badge element showing current connection state
+ */
+export function StatusBadge({ connected }: StatusBadgeProps) {
   if (connected === null) {
     return (
       <span style={styles.badge('#94a3b8')}>
@@ -25,7 +34,12 @@ export function StatusBadge({ connected }: Props) {
   );
 }
 
+/**
+ * Inline styles factory for StatusBadge component
+ * @param color Hex color string (e.g., '#22c55e') for badge styling
+ */
 const styles = {
+  /** Generates badge style with given color */
   badge: (color: string): React.CSSProperties => ({
     display: 'inline-flex',
     alignItems: 'center',
@@ -38,6 +52,7 @@ const styles = {
     fontWeight: 600,
     border: `1px solid ${color}44`,
   }),
+  /** Generates dot style with given color */
   dot: (color: string): React.CSSProperties => ({
     width: 8,
     height: 8,

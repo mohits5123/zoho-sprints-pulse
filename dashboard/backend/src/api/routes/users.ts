@@ -1,3 +1,10 @@
+/**
+ * User API - Manage users and fetch per-user metrics.
+ *
+ * Endpoints for user listing, profile data (issues raised/owned), sprint history,
+ * and sync operations. User role labels are local-only and not synced from Zoho.
+ */
+
 import { Router } from 'express';
 import axios from 'axios';
 import prisma from '../../db/client';
@@ -6,20 +13,52 @@ import { queryUserIssues, queryUserSprintHistory } from '../../services/issueQue
 
 const router = Router();
 
+/**
+ * Valid role labels for team members. Set manually via UI (not from Zoho).
+ */
 const VALID_ROLES = ['DEV', 'QA', 'PROD', 'OTHER'] as const;
 type Role = (typeof VALID_ROLES)[number];
 
-// GET /api/users — all locally stored users
+/**
+ * GET /api/users — List all locally stored users.
+ * @route GET /api/users
+ * @method GET
+ * @headers Content-Type: application/json
+ * @returns {Object} - { users: User[], total: number }
+ * @auth Required (OAuth token validation)
+ */
 router.get('/', async (_req, res) => {
   try {
     const users = await prisma.user.findMany({ orderBy: { name: 'asc' } });
     res.json({ users, total: users.length });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('❌ Users list failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
   }
 });
 
-// GET /api/users/:id/profile — cross-sprint issue summary for one developer
+/**
+ * GET /api/users/:id/profile — Cross-sprint issue summary for one developer.
+ * @route GET /api/users/:id/profile?staleDays=N (optional)
+ * @method GET
+ * @param {string} id - User's primary DB id (not zohoId)
+ * @query staleDays (optional, default: 7, min: 1) - Days since last update to consider issue stale
+ * @returns {Object} - User profile with issue metrics across all active sprints
+ *   {
+ *     user: { id, zohoId, name, email, role },
+ *     issues: Array<Issue> - All issues created by this user (across all active sprints)
+ *     raisedIssues: Issue[] - Filtered issues where this user is the creator
+ *     summary: { total, todo, doing, done, stale, overdue, collab, raised } - Aggregate counts
+ *     sprintCount: number - Total active sprints in system
+ *     staleDays: number - Used staleness threshold for this query
+ *   }
+ * @notes
+ *   - Single DB query, no Zoho calls per request (uses cached SQLite data)
+ *   - Issues are filtered to only active sprints via queryUserIssues()
+ *   - Creators != assignees; creator is who raised the ticket, not necessarily who's working on it
+ * @auth Required (OAuth token validation)
+ */
 router.get('/:id/profile', async (req, res) => {
   try {
     const staleDays = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
@@ -54,7 +93,22 @@ router.get('/:id/profile', async (req, res) => {
   }
 });
 
-// GET /api/users/:id/sprint-history — per-sprint stats for one developer
+/**
+ * GET /api/users/:id/sprint-history — Per-sprint contributor stats for one developer.
+ * @route GET /api/users/:id/sprint-history?limit=N (optional, default: 12)
+ * @method GET
+ * @param {string} id - User's primary DB id (not zohoId)
+ * @query limit (optional, default: 12, range: 1-20) - Maximum sprint history entries to return
+ * @returns {Object} - Per-sprint issue counts for this developer
+ *   {
+ *     history: Array<{ sprint: Sprint, createdAt: Date, raised: number, done: number }> - Sorted by sprint date ascending
+ *     total: number - Total sprint entries in history
+ *   }
+ * @notes
+ *   - Single DB query against issue creator field (no Zoho calls)
+ *   - Counts all issues raised by user in each sprint, grouped by status (done vs open)
+ * @auth Required (OAuth token validation)
+ */
 router.get('/:id/sprint-history', async (req, res) => {
   try {
     const limit = Math.min(20, Math.max(1, parseInt(String(req.query.limit ?? '12'), 10) || 12));
@@ -71,7 +125,20 @@ router.get('/:id/sprint-history', async (req, res) => {
   }
 });
 
-// POST /api/users/sync — pull from Zoho and upsert locally
+/**
+ * POST /api/users/sync — Pull user list from Zoho and upsert to local DB.
+ * @route POST /api/users/sync
+ * @method POST
+ * @headers Content-Type: application/json, Authorization: Zoho-oauthtoken (from session)
+ * @returns {Object} - Sync result with upserted user count
+ *   { synced: number, users: User[] } - Array of upserted user objects
+ * @notes
+ *   - Idempotent: Uses upsert pattern with unique zohoId key
+ *   - Only updates name and email from Zoho (role is local-only, not touched)
+ *   - Returns immediately with current DB state; actual sync happens in background via setImmediate
+ * @error 502 - Triggered if Zoho returns 0 users (authenticated account may lack admin scope)
+ * @auth Required (OAuth token validation via fetchZohoUsers())
+ */
 router.post('/sync', async (_req, res) => {
   try {
     const zohoUsers = await fetchZohoUsers();
@@ -104,18 +171,37 @@ router.post('/sync', async (_req, res) => {
   }
 });
 
-// PATCH /api/users/:id/role — update the local role label
+/**
+ * PATCH /api/users/:id/role — Update the local role label for a user.
+ * @route PATCH /api/users/:id/role
+ * @method PATCH
+ * @params {string} id - User's primary DB id (not zohoId)
+ * @body {Object} body: { role: 'DEV' | 'QA' | 'PROD' | 'OTHER' }
+ * @returns {Object} - Updated user object with new role. Response format: { user: User } where User contains { id: string, zohoId: string, name: string, email: string, role: Role }
+ *   { user: User }
+ * @errors
+ *   400 - Invalid role value (must be one of: DEV, QA, PROD, OTHER)
+ *   500 - Database error
+ * @notes
+ *   - Role is a LOCAL field only, not synced from Zoho
+ *   - Changes persist across syncs but do not affect Zoho data
+ * @auth Required (OAuth token validation)
+ */
 router.patch('/:id/role', async (req, res) => {
   try {
     const { id } = req.params;
     const { role } = req.body as { role: string };
+    
     if (!VALID_ROLES.includes(role as Role)) {
       res.status(400).json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(', ')}` });
       return;
     }
+    
     const user = await prisma.user.update({ where: { id }, data: { role } });
     res.json({ user });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('❌ Role update failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
   }
 });

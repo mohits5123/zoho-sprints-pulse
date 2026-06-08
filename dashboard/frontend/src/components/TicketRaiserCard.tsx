@@ -2,10 +2,17 @@ import { useEffect, useState } from 'react';
 import { fetchRaiserStats, type RaiserStat } from '../api/client';
 import { roleColor } from './UserAvatar';
 
+/** Generate initials from name */
 function initials(name: string) {
   return name.split(' ').map((w) => w[0] ?? '').join('').slice(0, 2).toUpperCase();
 }
 
+/**
+ * Status indicator dot with count and label
+ * @param color Hex color string for the dot indicator
+ * @param count Number of items in this status
+ * @param label Status label shown in tooltip
+ */
 function StatusDot({ color, count, label }: { color: string; count: number; label: string }) {
   return (
     <span title={`${count} ${label}`} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
@@ -20,11 +27,17 @@ function StatusDot({ color, count, label }: { color: string; count: number; labe
   );
 }
 
-function RaiserRow({ raiser, rank, onClick }: {
-  raiser:  RaiserStat;
-  rank:    number;
+interface RaiserRowProps {
+  /** Raiser statistics object */
+  raiser: RaiserStat;
+  /** Current rank of the raiser */
+  rank: number;
+  /** Callback when row is clicked */
   onClick: () => void;
-}) {
+}
+
+/** Individual row showing a ticket raiser with stacked progress bar */
+function RaiserRow({ raiser, rank, onClick }: RaiserRowProps) {
   const [hovered, setHovered] = useState(false);
   const total = raiser.todo + raiser.doing + raiser.done;
   const doneRatio = total > 0 ? raiser.done / total : 0;
@@ -98,11 +111,17 @@ function RaiserRow({ raiser, rank, onClick }: {
   );
 }
 
-export function TicketRaiserCard({ projectId, sprintId, onUserClick }: {
-  projectId:   string;
-  sprintId:    string;
+interface TicketRaiserCardProps {
+  /** Project ID */
+  projectId: string;
+  /** Sprint ID */
+  sprintId: string;
+  /** Callback when a user is clicked */
   onUserClick: (userId: string, userName: string) => void;
-}) {
+}
+
+/** TicketRaiserCard displays contributor statistics showing who raised the most tickets */
+export function TicketRaiserCard({ projectId, sprintId, onUserClick }: TicketRaiserCardProps) {
   const [raisers, setRaisers] = useState<RaiserStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);

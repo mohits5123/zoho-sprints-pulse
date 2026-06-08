@@ -1,25 +1,45 @@
+/**
+ * BurndownCard - Sprint Burndown Chart Component
+ * 
+ * A sprint burndown visualization that compares actual vs ideal progress towards task completion.
+ * Displays estimated vs actual data points with interactive tooltips, overdue indicators, and timeline markers.
+ */
+
 import { useEffect, useRef, useState } from 'react';
 import { fetchBurndownData, type BurndownPoint, type SprintSnapshot } from '../api/client';
 
+// Chart dimensions and padding
 const PAD = { top: 24, right: 24, bottom: 40, left: 48 };
-const W = 520;
-const H = 210;
+const W = 520; // Chart width in pixels
+const H = 210; // Chart height in pixels
 const IW = W - PAD.left - PAD.right;
 const IH = H - PAD.top  - PAD.bottom;
 
-function toDateStr(d: Date) {
+/**
+ * Converts a Date object to YYYY-MM-DD string
+ */
+function toDateStr(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
-function fmtLabel(iso: string) {
+
+/**
+ * Formats a date string as day.month (e.g., "6 Jun")
+ */
+function fmtLabel(iso: string): string {
   const d = new Date(iso + 'T00:00:00');
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
 
+/**
+ * Builds a Map of snapshots keyed by date for O(1) lookup
+ */
 function buildSnapshotMap(snapshots: BurndownPoint[]): Map<string, BurndownPoint> {
   return new Map(snapshots.map((s) => [s.date, s]));
 }
 
-/** All calendar days from start to axisEnd (inclusive) */
+/**
+ * Generates all calendar days between start and end dates (inclusive)
+ */
 function sprintDays(start: Date, axisEnd: Date): string[] {
   const days: string[] = [];
   const cur = new Date(start);
@@ -30,19 +50,35 @@ function sprintDays(start: Date, axisEnd: Date): string[] {
   return days;
 }
 
+/**
+ * Timeline point representing a single day's burndown state
+ */
 interface TimelinePoint {
-  date:       string;
-  remaining:  number;
-  doneCount:  number;
-  totalCount: number;
-  isActual:   boolean;
+  date:       string;     // YYYY-MM-DD format
+  remaining:  number;     // Estimated remaining tasks on this day
+  doneCount:  number;     // Number of tasks completed by end of previous day
+  totalCount: number;     // Total tasks at sprint start (unchanging)
+  isActual:   boolean;    // Whether data came from actual snapshot or interpolation
 }
 
+/**
+ * Builds the complete timeline with actual and interpolated points.
+ * 
+ * - For days with snapshots: uses real Zoho data (solid line)
+ * - For gaps between snapshots: linearly interpolates (dashed line)
+ * - Before first snapshot: holds constant at totalCount
+ * - After last snapshot: flatlines (sprint may have finished or is idle)
+ * 
+ * @param days - Array of date strings to generate points for
+ * @param snapshots - Map of actual snapshot data by date
+ * @param totalFallback - Total task count to use if no snapshots exist
+ */
 function buildTimeline(
   days: string[],
   snapshots: Map<string, BurndownPoint>,
   totalFallback: number,
 ): TimelinePoint[] {
+  // Index known snapshot points by array index (not date string)
   const known = new Map<number, { remaining: number; doneCount: number; totalCount: number }>();
 
   for (let i = 0; i < days.length; i++) {
@@ -56,16 +92,20 @@ function buildTimeline(
     }
   }
 
+  // Use last snapshot's total or fallback value
   const totalCount = snapshots.size > 0
     ? [...snapshots.values()][snapshots.size - 1].totalCount
     : totalFallback;
 
+  // Generate point for each day
   return days.map((date, i) => {
     if (known.has(i)) {
+      // This day has an actual snapshot
       const k = known.get(i)!;
       return { date, remaining: k.remaining, doneCount: k.doneCount, totalCount: k.totalCount, isActual: true };
     }
 
+    // Find previous and next known snapshot indices
     let prevIdx = -1;
     let nextIdx = days.length;
     for (const [ki] of known) {
@@ -77,18 +117,21 @@ function buildTimeline(
     let doneCount: number;
 
     if (prevIdx === -1 && nextIdx === days.length) {
+      // No snapshots at all — flatline at totalCount
       remaining = totalCount;
       doneCount = 0;
     } else if (prevIdx === -1) {
+      // Before first snapshot — interpolate to first known point
       const next = known.get(nextIdx)!;
       remaining = Math.round(Math.min(totalCount, next.remaining + next.remaining / (nextIdx - i)));
       doneCount = totalCount - remaining;
     } else if (nextIdx === days.length) {
-      // Past last known point — flat (sprint may have finished or is idle)
+      // Past last snapshot — flatline (sprint may have finished or is idle)
       const prev = known.get(prevIdx)!;
       remaining = prev.remaining;
       doneCount = prev.doneCount;
     } else {
+      // Between snapshots — linear interpolation
       const prev = known.get(prevIdx)!;
       const next = known.get(nextIdx)!;
       const t    = (i - prevIdx) / (nextIdx - prevIdx);
@@ -100,20 +143,49 @@ function buildTimeline(
   });
 }
 
-export function BurndownCard({ sprint, doneCount, totalCount }: {
-  sprint:     SprintSnapshot;
-  doneCount:  number;
+/**
+ * BurndownCard Component Props
+ */
+interface BurndownCardProps {
+  /** Sprint snapshot data containing dates, status, and Zoho ID */
+  sprint: SprintSnapshot;
+  /** Number of tasks completed (from parent component) */
+  doneCount: number;
+  /** Total tasks at sprint start (from parent component) */
   totalCount: number;
-}) {
+}
+
+/**
+ * BurndownCard - Sprint Burndown Visualization Component
+ * 
+ * Displays a sprint burndown chart comparing:
+ * - Actual progress from Zoho snapshots (solid blue line with dots)
+ * - Ideal burndown trajectory (dashed gray line from start to due date)
+ * - Estimated progress between snapshots (dashed blue line)
+ * 
+ * Features:
+ * - Interactive hover tooltips showing detailed metrics
+ * - Overdue zone shading (light red background when past due date)
+ * - Vertical markers for: Due date, Today (when overdue), Sprint start/mid/end
+ * - Dynamic axis labels based on sprint timeline and current date
+ * - Legend showing all line types and data sources
+ * 
+ * States displayed:
+ * - Days remaining / overdue indicator in status pill
+ * - Completed (green), Overdue (red), Active with countdown (orange)
+ */
+export function BurndownCard({ sprint, doneCount, totalCount }: BurndownCardProps) {
   const [snapshots, setSnapshots] = useState<BurndownPoint[]>([]);
   const svgRef = useRef<SVGSVGElement>(null);
   const [tooltip, setTooltip] = useState<{
     x: number; y: number; point: TimelinePoint; svgX: number;
   } | null>(null);
 
+  // Parse sprint dates, handling edge cases
   const start = sprint.startDate && sprint.startDate !== '-1' ? new Date(sprint.startDate) : null;
   const end   = sprint.endDate   && sprint.endDate   !== '-1' ? new Date(sprint.endDate)   : null;
 
+  // Fetch burndown data from API when sprint changes
   useEffect(() => {
     if (!sprint.zohoId) return;
     fetchBurndownData(sprint.zohoId, { doneCount, totalCount })
@@ -121,6 +193,7 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
       .catch(() => setSnapshots([]));
   }, [sprint.zohoId, doneCount, totalCount]);
 
+  // Early return if data is insufficient
   if (!start || !end || totalCount === 0) {
     return (
       <div style={s.card}>
@@ -134,35 +207,40 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
   const isCompleted = sprint.status === 'completed' || sprint.status === 'closed';
   const isOverdue   = now > end && !isCompleted;
 
-  // Axis end: for completed sprints cap at last snapshot; for active go up to today (even if past due)
+  // Determine chart axis endpoint
   const lastSnap    = snapshots.length > 0 ? new Date(snapshots[snapshots.length - 1].date + 'T00:00:00') : end;
   const axisEnd     = isCompleted
-    ? new Date(Math.max(end.getTime(), lastSnap.getTime()))
-    : new Date(Math.max(end.getTime(), now.getTime()));
+    ? new Date(Math.max(end.getTime(), lastSnap.getTime()))  // Completed: extend to last snapshot if past end
+    : new Date(Math.max(end.getTime(), now.getTime()));       // Active: extend to today (even if overdue)
 
+  // Build timeline data
   const snapshotMap = buildSnapshotMap(snapshots);
   const days        = sprintDays(start, axisEnd);
   const timeline    = buildTimeline(days, snapshotMap, totalCount);
 
-  // Scale: x maps [start, axisEnd], y maps [0, totalCount]
+  // Coordinate scaling functions
   const totalMs = axisEnd.getTime() - start.getTime();
+  
+  /** Convert date to X pixel position */
   const xOf = (date: Date) => {
     const ms = Math.min(Math.max(date.getTime() - start.getTime(), 0), totalMs);
     return PAD.left + (ms / totalMs) * IW;
   };
+
+  /** Convert remaining count to Y pixel position (inverted: more = lower) */
   const yOf = (remaining: number) => PAD.top + (1 - remaining / totalCount) * IH;
 
-  // Overdue zone: shaded rect from endDate to axisEnd
+  // Calculate overdue zone geometry
   const endX   = xOf(end);
   const showOverdueZone = axisEnd > end;
 
-  // Ideal line: from (start, total) to (end, 0) — the planned completion
+  // Ideal burndown line (start: totalCount → end: 0)
   const ix1 = PAD.left;
   const iy1 = yOf(totalCount);
   const ix2 = endX;
   const iy2 = yOf(0);
 
-  // Segment runs for actual (solid) vs estimated (dashed)
+  // Split timeline into segments by actual/estimated type
   const actualPts = timeline.filter((p) => p.isActual);
   const allPts    = timeline;
 
@@ -179,6 +257,7 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
     }
   }
 
+  /** Convert timeline points to SVG path coordinates */
   const segPath = (pts: TimelinePoint[]) =>
     pts.map((p, i) => {
       const px = xOf(new Date(p.date + 'T00:00:00'));
@@ -186,17 +265,18 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
       return `${i === 0 ? 'M' : 'L'} ${px} ${py}`;
     }).join(' ');
 
-  // Y-axis ticks
+  // Y-axis tick labels at 0%, 25%, 50%, 75%, 100%
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * totalCount));
 
-  // X-axis ticks: start, midpoint of planned range, due date, and today if overdue
+  // X-axis tick labels
   const plannedMid = new Date(start.getTime() + (end.getTime() - start.getTime()) / 2);
   const xTicks: { d: Date; label: string; emphasize?: boolean }[] = [
     { d: start,       label: fmtLabel(toDateStr(start)) },
     { d: plannedMid,  label: fmtLabel(toDateStr(plannedMid)) },
     { d: end,         label: fmtLabel(toDateStr(end)), emphasize: true },
   ];
-  // Add today tick only when overdue and today is meaningfully past the due tick
+
+  // Add "Today" tick only when overdue and significantly past due (>1.5 days)
   if (showOverdueZone && (now.getTime() - end.getTime()) > 86400000 * 1.5) {
     xTicks.push({ d: now, label: 'Today', emphasize: true });
   }
@@ -204,6 +284,8 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
   const todayX  = xOf(now);
   const daysLeft = Math.ceil((end.getTime() - now.getTime()) / 86400000);
   const overdueBy = Math.ceil((now.getTime() - end.getTime()) / 86400000);
+
+  // Status pill color and label based on sprint state
   const pillColor = isOverdue ? '#ef4444' : isCompleted ? '#22c55e' : '#f59e0b';
   const daysLabel = isCompleted
     ? '✓ Completed'
@@ -211,16 +293,21 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
     ? `${overdueBy}d overdue`
     : daysLeft === 0 ? 'Last day' : `${daysLeft}d left`;
 
-  // Hover handling
+  /** Handle mouse move for interactive tooltip */
   function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
     const svg = svgRef.current;
     if (!svg) return;
+    
     const rect = svg.getBoundingClientRect();
     const svgX = ((e.clientX - rect.left) / rect.width) * W;
+
+    // Exit if cursor outside chart area
     if (svgX < PAD.left || svgX > PAD.left + IW || allPts.length === 0) {
       setTooltip(null);
       return;
     }
+
+    // Find closest timeline point horizontally
     let closest = allPts[0];
     let minDist  = Infinity;
     for (const pt of allPts) {
@@ -228,6 +315,7 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
       const d  = Math.abs(px - svgX);
       if (d < minDist) { minDist = d; closest = pt; }
     }
+
     const px = xOf(new Date(closest.date + 'T00:00:00'));
     const py = yOf(closest.remaining);
     setTooltip({ x: px, y: py, point: closest, svgX: px });
@@ -235,6 +323,7 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
 
   return (
     <div style={s.card}>
+      {/* Header with label and status pill */}
       <div style={s.headerRow}>
         <p style={s.label}>
           Sprint Burndown <span style={s.labelSub}>(estimated)</span>
@@ -252,7 +341,7 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
         onMouseMove={handleMouseMove}
         onMouseLeave={() => setTooltip(null)}
       >
-        {/* Overdue zone shading */}
+        {/* Overdue zone: light red shading for area past due date */}
         {showOverdueZone && (
           <rect
             x={endX} y={PAD.top}
@@ -261,7 +350,7 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
           />
         )}
 
-        {/* Y grid lines */}
+        {/* Y-axis grid lines and labels */}
         {yTicks.map((t) => {
           const y = yOf(t);
           return (
@@ -274,7 +363,7 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
           );
         })}
 
-        {/* X-axis tick labels */}
+        {/* X-axis tick labels with emphasis on due date */}
         {xTicks.map(({ d, label, emphasize }) => (
           <text
             key={label}
@@ -289,7 +378,7 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
           </text>
         ))}
 
-        {/* Ideal burndown line — only from start to end (due date) */}
+        {/* Ideal burndown line: perfect trajectory from start to due date */}
         <line x1={ix1} y1={iy1} x2={ix2} y2={iy2}
           stroke="#334155" strokeWidth={1.5} strokeDasharray="6 4" />
 
@@ -303,13 +392,13 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
           </>
         )}
 
-        {/* Today vertical guide — show when within axis range */}
+        {/* Today vertical guide: shows when overdue */}
         {now >= start && now <= axisEnd && (
           <line x1={todayX} y1={PAD.top} x2={todayX} y2={PAD.top + IH}
             stroke="#475569" strokeWidth={1} strokeDasharray="3 3" />
         )}
 
-        {/* Actual / interpolated line segments */}
+        {/* Actual/estimated line segments */}
         {segments.map((seg, i) => (
           <path
             key={i}
@@ -321,7 +410,7 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
           />
         ))}
 
-        {/* Actual data dots */}
+        {/* Actual data points (dots) */}
         {actualPts.map((p) => {
           const px = xOf(new Date(p.date + 'T00:00:00'));
           const py = yOf(p.remaining);
@@ -334,33 +423,49 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
         <line x1={PAD.left} y1={PAD.top + IH} x2={PAD.left + IW} y2={PAD.top + IH}
           stroke="#334155" strokeWidth={1} />
 
-        {/* Hover crosshair + tooltip */}
+        {/* Interactive hover crosshair and tooltip */}
         {tooltip && (() => {
           const { x, y, point } = tooltip;
           const overduePoint = point.date > toDateStr(end);
+
+          // Position tooltip (flip left if would overflow)
           const tipW = 138;
           const tipX = x + tipW + 10 > W ? x - tipW - 6 : x + 10;
           const tipY = Math.max(PAD.top, Math.min(y - 30, PAD.top + IH - 62));
+
           return (
             <>
+              {/* Hover crosshair line */}
               <line x1={x} y1={PAD.top} x2={x} y2={PAD.top + IH}
                 stroke="#60a5fa" strokeWidth={1} strokeDasharray="3 2" opacity={0.5} />
+
+              {/* Highlighted point on chart */}
               <circle cx={x} cy={y} r={5}
                 fill={point.isActual ? '#3b82f6' : '#60a5fa80'}
                 stroke={point.isActual ? '#93c5fd' : '#60a5fa'} strokeWidth={1.5} />
+
+              {/* Tooltip box */}
               <rect x={tipX} y={tipY} width={tipW} height={overduePoint ? 72 : 58} rx={6}
                 fill="#0f172a" stroke="#334155" strokeWidth={1} />
+
+              {/* Date label */}
               <text x={tipX + 8} y={tipY + 14} fill="#94a3b8" fontSize={10}>
                 {fmtLabel(point.date)}
                 {!point.isActual && <tspan fill="#f59e0b" fontSize={9}> est</tspan>}
                 {overduePoint && <tspan fill="#ef4444" fontSize={9}> overdue</tspan>}
               </text>
+
+              {/* Remaining tasks */}
               <text x={tipX + 8} y={tipY + 30} fill="#f1f5f9" fontSize={12} fontWeight={700}>
                 {point.remaining} remaining
               </text>
+
+              {/* Completion progress */}
               <text x={tipX + 8} y={tipY + 46} fill="#64748b" fontSize={10}>
                 {point.doneCount} / {point.totalCount} done
               </text>
+
+              {/* Overdue indicator */}
               {overduePoint && (
                 <text x={tipX + 8} y={tipY + 62} fill="#ef444499" fontSize={10}>
                   {Math.round((new Date(point.date + 'T00:00:00').getTime() - end.getTime()) / 86400000)}d past due
@@ -371,6 +476,7 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
         })()}
       </svg>
 
+      {/* Legend explaining chart elements */}
       <div style={s.legend}>
         <span style={s.legendItem}>
           <span style={{ ...s.legendDash, borderTop: '2px dashed #334155' }} /> Ideal
@@ -397,6 +503,9 @@ export function BurndownCard({ sprint, doneCount, totalCount }: {
   );
 }
 
+/**
+ * Component styles object (React.CSSProperties)
+ */
 const s: Record<string, React.CSSProperties> = {
   card: {
     backgroundColor: '#1e293b', border: '1px solid #334155',

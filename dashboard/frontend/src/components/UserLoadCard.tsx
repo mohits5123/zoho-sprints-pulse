@@ -2,21 +2,41 @@ import { useEffect, useState } from 'react';
 import { fetchUserStats, type UserLoadStat } from '../api/client';
 import { roleColor } from './UserAvatar';
 
+/**
+ * Color mapping for status groups.
+ * Used to color-code tasks by their current state.
+ */
 const GROUP_COLORS = {
   todo:  '#475569',
   doing: '#3b82f6',
   done:  '#22c55e',
 } as const;
 
+/**
+ * Display labels for status groups.
+ * Used in legend to show task states.
+ */
 const GROUP_LABELS = { todo: 'Todo', doing: 'In Progress', done: 'Done' } as const;
 
+/**
+ * Extract first two characters of a name as initials.
+ * Used for avatar display.
+ * @param name User's full name
+ * @returns Uppercase string of first two characters
+ */
 function initials(name: string) {
   return name.split(' ').map((w) => w[0] ?? '').join('').slice(0, 2).toUpperCase();
 }
 
+/**
+ * Props for the Bar component rendering individual user load rows.
+ */
 function Bar({ user, maxActive, onClick }: {
+  /** User load statistics */
   user:      UserLoadStat;
+  /** Maximum active tickets across all users (for scaling bars) */
   maxActive: number;
+  /** Click handler to navigate to user profile */
   onClick:   () => void;
 }) {
   const active = user.todo + user.doing;
@@ -24,13 +44,16 @@ function Bar({ user, maxActive, onClick }: {
   const [hovered, setHovered] = useState(false);
   if (total === 0) return null;
 
+  // Calculate bar widths based on active tickets vs max across all users
   const barW  = maxActive > 0 ? Math.max((active / maxActive) * 100, active > 0 ? 4 : 0) : 0;
   const doneW = total > 0 ? (user.done / total) * 100 : 0;
 
+  // Split active bar into todo and doing segments
   const todoFrac  = active > 0 ? (user.todo  / active) * barW : 0;
   const doingFrac = active > 0 ? (user.doing / active) * barW : 0;
 
   return (
+    /* User load row with avatar, stacked bar, and counts */
     <div
       style={{
         ...b.row,
@@ -44,7 +67,7 @@ function Bar({ user, maxActive, onClick }: {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Avatar */}
+      {/* Avatar showing user initials with role color */}
       <div style={{ ...b.avatar, backgroundColor: roleColor(user.role) }} title={user.role}>
         {initials(user.name)}
       </div>
@@ -57,15 +80,17 @@ function Bar({ user, maxActive, onClick }: {
         </span>
       </div>
 
-      {/* Stacked bar */}
+      {/* Stacked bar showing todo, doing, and done tickets */}
       <div style={b.barTrack}>
         <div style={b.barInner}>
+          {/* Todo segment (gray) */}
           {user.todo > 0 && (
             <div
               style={{ width: `${todoFrac}%`, backgroundColor: GROUP_COLORS.todo, ...b.seg }}
               title={`${user.todo} todo`}
             />
           )}
+          {/* Doing segment (blue) */}
           {user.doing > 0 && (
             <div
               style={{ width: `${doingFrac}%`, backgroundColor: GROUP_COLORS.doing, ...b.seg }}
@@ -82,7 +107,7 @@ function Bar({ user, maxActive, onClick }: {
         </div>
       </div>
 
-      {/* Counts */}
+      {/* Ticket counts for each status */}
       <div style={b.counts}>
         {user.todo > 0  && <span style={{ color: GROUP_COLORS.todo  }}>{user.todo}</span>}
         {user.doing > 0 && <span style={{ color: GROUP_COLORS.doing }}>{user.doing}</span>}
@@ -92,12 +117,23 @@ function Bar({ user, maxActive, onClick }: {
   );
 }
 
+/**
+ * UserLoadCard displays workload distribution across team members.
+ * Shows stacked bars for each user indicating their todo, in-progress, and done tickets.
+ * Highlights overloaded users (>5 active tickets) and provides clickable rows.
+ * 
+ * @param projectId - The project ID to filter issues
+ * @param sprintId - The sprint ID to filter issues
+ * @param staleDays - Number of days to consider tickets as stale (default: 7)
+ * @param onUserClick - Callback when a user row is clicked
+ */
 export function UserLoadCard({ projectId, sprintId, staleDays = 7, onUserClick }: {
   projectId:   string;
   sprintId:    string;
   staleDays?:  number;
   onUserClick: (userId: string, userName: string) => void;
 }) {
+  // State for fetching and displaying user load statistics
   const [users, setUsers]   = useState<UserLoadStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]   = useState<string | null>(null);
@@ -110,13 +146,15 @@ export function UserLoadCard({ projectId, sprintId, staleDays = 7, onUserClick }
       .finally(() => setLoading(false));
   }, [projectId, sprintId, staleDays]);
 
+  // Calculate metrics from user data
   const maxActive = users.reduce((m, u) => Math.max(m, u.todo + u.doing), 0);
   const totalIssues = users.reduce((s, u) => s + u.todo + u.doing + u.done, 0);
+  // Count users with more than 5 active tickets (overloaded threshold)
   const overloaded  = users.filter((u) => u.todo + u.doing > 5).length;
 
   return (
     <div style={s.card}>
-      {/* Header */}
+      {/* Header with title, contributor count, and warning for overloaded users */}
       <div style={s.headerRow}>
         <div>
           <p style={s.label}>User Load</p>
@@ -129,7 +167,7 @@ export function UserLoadCard({ projectId, sprintId, staleDays = 7, onUserClick }
         )}
       </div>
 
-      {/* Legend */}
+      {/* Legend explaining color coding for status groups */}
       <div style={s.legend}>
         {(['todo', 'doing', 'done'] as const).map((g) => (
           <span key={g} style={s.legendItem}>
@@ -139,7 +177,7 @@ export function UserLoadCard({ projectId, sprintId, staleDays = 7, onUserClick }
         ))}
       </div>
 
-      {/* Rows */}
+      {/* User load rows or loading/error messages */}
       <div style={s.list}>
         {loading && <p style={s.muted}>Loading user stats…</p>}
         {error   && <p style={s.muted}>Failed to load: {error}</p>}
@@ -154,9 +192,10 @@ export function UserLoadCard({ projectId, sprintId, staleDays = 7, onUserClick }
   );
 }
 
-// ── Row styles ────────────────────────────────────────────────────────────────
+// ── Row styles for individual user load entries ──────────────────────────────
 const b: Record<string, React.CSSProperties> = {
   row: {
+    /** Grid layout for user row */
     display: 'grid',
     gridTemplateColumns: '28px 120px 1fr 64px',
     alignItems: 'center',
@@ -164,16 +203,19 @@ const b: Record<string, React.CSSProperties> = {
     borderBottom: '1px solid #1e293b',
   },
   avatar: {
+    /** Circular avatar with role color */
     width: 26, height: 26, borderRadius: '50%',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     fontSize: 9, fontWeight: 700, color: '#fff', flexShrink: 0,
   },
   nameCol: { display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' },
   name: {
+    /** User name with truncation */
     fontSize: 12, color: '#e2e8f0', fontWeight: 500,
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
   },
   roleChip: {
+    /** Role badge with role color */
     fontSize: 9, fontWeight: 700, padding: '1px 5px',
     borderRadius: 10, border: '1px solid', flexShrink: 0,
   },
@@ -181,15 +223,17 @@ const b: Record<string, React.CSSProperties> = {
   barInner: { display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', width: '100%', gap: 1 },
   seg: { height: '100%', minWidth: 2, borderRadius: 2, transition: 'width 0.3s ease' },
   counts: {
+    /** Ticket counts for each status group */
     display: 'flex', gap: 4, justifyContent: 'flex-end',
     fontSize: 11, fontWeight: 600, fontVariantNumeric: 'tabular-nums',
     color: '#64748b',
   },
 };
 
-// ── Card styles ───────────────────────────────────────────────────────────────
+// ── Card styles for the main container ───────────────────────────────────────
 const s: Record<string, React.CSSProperties> = {
   card: {
+    /** Main card styling with dark theme */
     backgroundColor: '#1e293b', border: '1px solid #334155',
     borderRadius: 12, padding: '20px 22px',
     display: 'flex', flexDirection: 'column', gap: 10,
@@ -197,11 +241,13 @@ const s: Record<string, React.CSSProperties> = {
   },
   headerRow: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' },
   label: {
+    /** Section label styling */
     margin: 0, fontSize: 11, fontWeight: 600,
     color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em',
   },
   sub: { margin: '2px 0 0', fontSize: 11, color: '#475569' },
   warnPill: {
+    /** Warning indicator for overloaded users */
     fontSize: 11, fontWeight: 700, padding: '3px 8px',
     borderRadius: 20, border: '1px solid #f59e0b44',
     color: '#f59e0b', backgroundColor: '#f59e0b11', flexShrink: 0,

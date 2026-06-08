@@ -8,6 +8,10 @@ import { syncAll } from './services/zohoSprints';
 import { touchLastSyncedAt } from './services/syncStatus';
 import apiRouter from './api/router';
 
+/**
+ * Executes a full data synchronization with Zoho Sprints.
+ * Updates projects, sprints, issues, and updates the last sync timestamp.
+ */
 async function runFullSync(): Promise<void> {
   try {
     console.log('⏱  Full sync starting…');
@@ -20,6 +24,12 @@ async function runFullSync(): Promise<void> {
   }
 }
 
+/**
+ * Bootstraps the Express server and initializes the application.
+ * 
+ * Performs authentication initialization, sets up middleware (CORS, JSON parsing),
+ * mounts API routes, and starts the HTTP server with cron-based auto-sync.
+ */
 async function bootstrap(): Promise<void> {
   console.log('🚀 Zonaliser starting...');
 

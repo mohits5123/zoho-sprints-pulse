@@ -1,3 +1,29 @@
+/**
+ * User profile page component.
+ *
+ * Displays a detailed profile view for a specific team member, including:
+ * - Header with avatar, name, email, and role badge
+ * - Snapshot stats: total, todo, doing, done, stale, overdue, raised tickets
+ * - Status distribution (bar chart of active issue statuses)
+ * - Raised vs Assigned comparison (raised tickets vs assigned to user)
+ * - Collaboration score (percentage of tickets co-worked)
+ * - Stale tickets list (issues over staleDays threshold)
+ * - Overdue tickets list (issues past target date, not done)
+ * - Sprint history (last N sprints with assigned/done/completion metrics)
+ * - Tickets raised this sprint (with status badges)
+ *
+ * Features:
+ * - Click on any issue to navigate to filtered issue list
+ * - Stale threshold configurable (default 7 days)
+ * - Role-based avatar colors (DEV/QA/PROD/OTHER)
+ * - Empty states for missing data
+ * - Loading and error states
+ *
+ * Data flows:
+ * - Profile data fetched from local SQLite via backend
+ * - Sprint history fetched independently
+ * - Navigation to issues page with filter params
+ */
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {

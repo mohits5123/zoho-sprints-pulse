@@ -1,3 +1,31 @@
+/**
+ * Board page component.
+ *
+ * Displays a detailed view of a specific project (pod), including:
+ * - Project name and board type (scrum/kanban)
+ * - Sprint picker for scrum boards with multiple active sprints
+ * - Sprint overview card with ticket counts and user breakdown
+ * - Sprint progress card showing epic-level progress
+ * - Burndown card showing sprint completion progress
+ * - User load card (WIP by user)
+ * - User completion card (completion % by user)
+ * - User stale card (stale tickets by user)
+ * - Ticket raiser card (users who raised tickets)
+ * - Epic cards with status breakdown (for scrum sprints only)
+ *
+ * Features:
+ * - Auto-selects first sprint for scrum or kanban board
+ * - Sprint picker dropdown when multiple active sprints exist
+ * - Stale ticket settings modal (per-project, persisted to localStorage)
+ * - Click-through to filtered issue list from any card
+ * - Empty states for missing data
+ *
+ * Data flows:
+ * - Project and sprint data from local SQLite
+ * - Epic data fetched per sprint (only for scrum boards)
+ * - Stale config loaded from localStorage (per project)
+ * - All navigation uses URL params for filter state
+ */
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { fetchProject, fetchSprintEpics, fetchSyncStatus, type EpicBreakdown, type Project, type SprintSnapshot } from '../api/client';
@@ -13,6 +41,13 @@ import { LastSyncedFooter } from '../components/LastSyncedFooter';
 import { StaleManagerModal, loadStaleConfig, type StaleConfig } from '../components/StaleManagerModal';
 import { sortByRole } from '../components/UserAvatar';
 
+/**
+ * Builds a synthetic SprintSnapshot for kanban boards.
+ * Kanban boards don't have real sprints; they represent the entire board as one sprint.
+ *
+ * @param project - The kanban project with statusBreakdown and statusGroups
+ * @returns A SprintSnapshot object with id='kanban-board'
+ */
 function buildKanbanSprint(project: Project): SprintSnapshot {
   const breakdown = project.statusBreakdown ? JSON.parse(project.statusBreakdown) as Record<string, number> : {};
   const groups    = project.statusGroups    ? JSON.parse(project.statusGroups)    as Record<string, string>  : {};

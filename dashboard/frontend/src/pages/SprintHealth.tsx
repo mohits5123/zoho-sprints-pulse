@@ -1,3 +1,20 @@
+/**
+ * Sprint Health page component.
+ *
+ * Displays a grid of sprint cards showing active sprint status for all scrum projects.
+ * Each card shows sprint name, status, and ticket counts by status group (todo/doing/done).
+ *
+ * Features:
+ * - Grid of SprintCard components, one per active sprint
+ * - Sync button to refresh sprint data from Zoho (background poll after sync)
+ * - Auto-refresh: polls every 5s after sync until lastSyncedAt changes
+ * - Empty state with sync prompt if no sprint data available
+ * - Back navigation to dashboard
+ *
+ * Data flows:
+ * - Sprint data fetched from local SQLite (served by backend)
+ * - Sync is fire-and-forget; backend returns immediately, frontend polls for completion
+ */
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchSprints, syncSprints, fetchSyncStatus, SprintSnapshot } from '../api/client';

@@ -31,6 +31,11 @@ export function sortStatusEntries(
   });
 }
 
+/**
+ * Get color for a user role
+ * @param role User role string (DEV, QA, PROD, OTHER)
+ * @returns Hex color code for the role
+ */
 export function roleColor(role: string): string {
   return ROLE_COLORS[role] ?? ROLE_COLORS.OTHER;
 }

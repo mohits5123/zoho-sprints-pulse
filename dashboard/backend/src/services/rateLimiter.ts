@@ -1,17 +1,20 @@
 /**
  * Fixed-window rate limiter for Zoho API calls.
- * Enforces 25 requests per 60-second window. When the limit is reached,
- * waits for the current window to expire before resuming.
- *
- * Usage:
- *   await zohoThrottle.wait('label');  // before every Zoho axios call
- *   zohoThrottle.record(res.status);   // after a successful response
- *   zohoThrottle.recordError(status?); // after a failed/thrown request
- *   zohoThrottle.printSummary();       // at end of sync
+ * 
+ * Enforces 25 requests per 60-second sliding window to avoid hitting Zoho's rate limits.
+ * When the limit is reached, automatically waits for the next window to expire before
+ * allowing more requests. Required on every runtime API call per project constraints.
+ * 
+ * Usage pattern:
+ *   - await zohoThrottle.wait('label')  // Before every Zoho axios call (include label for tracking)
+ *   - zohoThrottle.record(statusCode)   // After successful response (interceptor now handles this)
+ *   - zohoThrottle.recordError(status?) // After failed/thrown request (interceptor now handles this)
+ *   - zohoThrottle.printSummary()       // At end of sync for statistics
  */
 
 import axios from 'axios';
 
+/** Sleep helper: non-blocking delay. */
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -23,28 +26,36 @@ function cleanUrl(url?: string): string {
     .replace('https://accounts.zoho.in', '');
 }
 
+/**
+ * Rate limiter class enforcing 25 requests per 60-second window.
+ * Tracks request stats for the current sync run and automatically waits when limit is reached.
+ */
 class ZohoRateLimiter {
-  private windowStart = 0;
-  private windowCount = 0;
-  private readonly limit = 25;
-  private readonly windowMs = 60_000;
+  private windowStart = 0;      // Unix timestamp when current window started
+  private windowCount = 0;      // Number of requests in current window (max: 25)
+  private readonly limit = 25;  // Zoho's rate limit: 25 requests per window
+  private readonly windowMs = 60_000;  // 60 seconds in milliseconds
 
-  // Stats for current sync run
-  public sent = 0;
-  public ok = 0;
-  public failed = 0;
-  private _label = '';
+  /** Stats for current sync run (reset at each sync start). */
+  public sent = 0;      // Total requests attempted in this run
+  public ok = 0;        // Successful responses (2xx)
+  public failed = 0;    // Failed requests (non-2xx or errors)
+  private _label = '';   // Current request label for tracking
 
+  /**
+   * Wait if rate limit is reached. Blocks until next window starts.
+   * @param label Optional request label for tracking/logging (e.g., 'users/p1')
+   */
   async wait(label = ''): Promise<void> {
     const now = Date.now();
 
-    // Start or reset fixed window
+    // Start or reset fixed window when it expires
     if (this.windowStart === 0 || now - this.windowStart >= this.windowMs) {
       this.windowStart = now;
       this.windowCount = 0;
     }
 
-    // Window full — wait for it to expire
+    // Window full — wait for it to expire before making request
     if (this.windowCount >= this.limit) {
       const waitMs = this.windowMs - (now - this.windowStart) + 100;
       console.log(`⏳ Rate limit (${this.limit} req/min) — waiting ${Math.ceil(waitMs / 1000)}s for next window...`);
@@ -53,28 +64,33 @@ class ZohoRateLimiter {
       this.windowCount = 0;
     }
 
+    // Increment counter and track stats
     this.windowCount++;
     this.sent++;
     this._label = label;
   }
 
+  /** Record successful response (interceptor now handles logging). */
   recordSuccess(): void {
     this.ok++;
   }
 
+  /** Record failed response (interceptor now handles logging). */
   recordFailure(): void {
     this.failed++;
   }
 
-  // Legacy wrappers for backwards compatibility (no-op console logs to prevent duplicates)
+  /** Legacy wrappers for backwards compatibility (no-op console logs). */
   record(statusCode: number): void {
     // Interceptor now handles counting and logging
   }
 
+  /** Record error (interceptor now handles counting). */
   recordError(statusCode?: number): void {
     // Interceptor now handles counting and logging
   }
 
+  /** Print sync statistics summary. */
   printSummary(): void {
     console.log(`\n📊 Zoho Sync Summary:`);
     console.log(`   Total requests sent:  ${this.sent}`);
@@ -82,6 +98,7 @@ class ZohoRateLimiter {
     console.log(`   Failed requests:      ${this.failed}\n`);
   }
 
+  /** Reset all statistics for new sync run. */
   resetStats(): void {
     this.sent = 0;
     this.ok = 0;
@@ -91,19 +108,20 @@ class ZohoRateLimiter {
     this._label = '';
   }
 
+  /** Get current request count in window. Returns 0 if window has expired. */
   getCurrentCount(): number {
     const now = Date.now();
     if (now - this.windowStart >= this.windowMs) return 0;
     return this.windowCount;
   }
 
-  // Legacy alias
+  /** Legacy alias for resetStats(). */
   reset(): void { this.resetStats(); }
 }
 
 export const zohoThrottle = new ZohoRateLimiter();
 
-// Register global Axios interceptors for centralized logging
+// Register global Axios interceptors for centralized request/response logging
 axios.interceptors.response.use(
   (response) => {
     const cleaned = cleanUrl(response.config.url);

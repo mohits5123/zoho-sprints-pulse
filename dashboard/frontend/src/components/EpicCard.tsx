@@ -3,16 +3,35 @@ import type { EpicBreakdown } from '../api/client';
 import { UserAvatar, sortByRole } from './UserAvatar';
 import { DonutChart } from './DonutChart';
 
+/**
+ * EpicCard displays a visual breakdown of an epic's issues across sprints,
+ * grouped by status buckets (todo/doing/done).
+ *
+ * Features:
+ * - Donut chart showing completion percentage
+ * - Status breakdown rows (clickable if callback provided)
+ * - User avatars with optional click handlers
+ * - Stale badge for aged issues (default: 7 days)
+ * - Done badge when all tickets are completed
+ */
+
 const GROUP_COLORS = { todo: '#64748b', doing: '#3b82f6', done: '#22c55e' };
 const GROUP_ORDER  = ['todo', 'doing', 'done'] as const;
 
-export function EpicCard({ epic, staleDays, onStatusClick, onStaleClick, onUserClick }: {
+interface EpicCardProps {
+  /** The epic data to display */
   epic: EpicBreakdown;
+  /** Number of days to consider an issue stale (default: 7) */
   staleDays?: number;
+  /** Callback when a status row is clicked */
   onStatusClick?: (status: string) => void;
+  /** Callback when stale badge is clicked */
   onStaleClick?: () => void;
+  /** Callback when a user avatar is clicked */
   onUserClick?: (userId: string, userName: string) => void;
-}) {
+}
+
+export function EpicCard({ epic, staleDays, onStatusClick, onStaleClick, onUserClick }: EpicCardProps) {
   const rawEntries = Object.entries(epic.statusBreakdown);
   const total      = epic.total || rawEntries.reduce((s, [, n]) => s + n, 0);
   const allDone    = total > 0 && rawEntries.every(([status]) => epic.statusGroups[status] === 'done');
@@ -98,8 +117,23 @@ export function EpicCard({ epic, staleDays, onStatusClick, onStaleClick, onUserC
   );
 }
 
+/**
+ * EpicStatusRow displays a single status breakdown row with:
+ * - Color-coded dot (by group: todo/doing/done)
+ * - Status label, count and percentage
+ * - Optional click handler for filtering
+ */
 function EpicStatusRow({ status, count, total, color, onClick }: {
-  status: string; count: number; total: number; color: string; onClick?: () => void;
+  /** Status name (e.g., 'todo', 'done') */
+  status: string;
+  /** Number of issues in this status */
+  count: number;
+  /** Total issues across all statuses */
+  total: number;
+  /** Color of the status dot */
+  color: string;
+  /** Optional callback when row is clicked */
+  onClick?: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const clickable = !!onClick;
@@ -128,35 +162,55 @@ function EpicStatusRow({ status, count, total, color, onClick }: {
   );
 }
 
+/**
+ * Inline styles for EpicCard component
+ */
 const s: Record<string, React.CSSProperties> = {
+  /** Card container with dark theme */
+  /** Card container with dark theme */
   card: {
     backgroundColor: '#1e293b', border: '1px solid #334155',
     borderRadius: 12, padding: '20px 22px',
     display: 'flex', flexDirection: 'column', gap: 10,
   },
+  /** Header row with label and badges */
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  /** Epic label text */
   epicLabel: {
     fontSize: 11, fontWeight: 600, color: '#a78bfa',
     textTransform: 'uppercase' as const, letterSpacing: '0.06em',
   },
+  /** Stale warning badge (yellow) */
   staleBadge: {
     fontSize: 11, fontWeight: 600, color: '#f59e0b',
     backgroundColor: '#f59e0b18', border: '1px solid #f59e0b44',
     borderRadius: 20, padding: '2px 8px', letterSpacing: '0.02em',
   },
+  /** Done completion badge (green) */
   doneBadge: {
     fontSize: 11, fontWeight: 700, color: '#22c55e',
     backgroundColor: '#22c55e18', border: '1px solid #22c55e55',
     borderRadius: 20, padding: '2px 8px',
   },
+  /** Epic name title */
   epicName: { margin: 0, fontSize: 15, fontWeight: 700, color: '#f1f5f9', lineHeight: 1.3 },
+  /** User avatars container */
   users: { display: 'flex', flexWrap: 'wrap' as const, gap: 4 },
+  /** Donut chart and breakdown side-by-side row */
+  /** Status breakdown rows container */
   ringRow: { display: 'flex', alignItems: 'center', gap: 12 },
+  /** Individual breakdown row */
   breakdown: { display: 'flex', flexDirection: 'column', gap: 3, flex: 1 },
+  /** Single status row layout */
   breakdownRow: { display: 'flex', alignItems: 'center', gap: 6 },
+  /** Status indicator dot */
   dot: { width: 7, height: 7, borderRadius: '50%', flexShrink: 0 },
+  /** Status label text */
   statusLabel: { fontSize: 12, color: '#94a3b8', flex: 1 },
+  /** Issue count display */
   statusCount: { fontSize: 13, fontWeight: 600, minWidth: 24, textAlign: 'right' as const },
+  /** Percentage display */
   statusPct:   { fontSize: 11, color: '#64748b', minWidth: 32, textAlign: 'right' as const },
+  /** Muted text for empty states */
   muted: { color: '#64748b', fontSize: 14, margin: 0 },
 };

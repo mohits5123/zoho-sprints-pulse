@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { User, UserRole, updateUserRole } from '../api/client';
 
+/**
+ * Metadata for user roles including color and display label.
+ * Used to render role selectors and avatars.
+ */
 const ROLE_META: Record<UserRole, { color: string; label: string }> = {
   DEV:   { color: '#3b82f6', label: 'DEV' },
   QA:    { color: '#a855f7', label: 'QA' },
@@ -8,33 +12,69 @@ const ROLE_META: Record<UserRole, { color: string; label: string }> = {
   OTHER: { color: '#64748b', label: 'OTHER' },
 };
 
+/**
+ * Avatar color palette for generating distinct user avatars.
+ * Colors are distributed based on user name hash.
+ */
 const AVATAR_PALETTE = [
   '#3b82f6', '#8b5cf6', '#ec4899',
   '#14b8a6', '#f59e0b', '#ef4444', '#22c55e', '#06b6d4',
 ];
 
+/**
+ * Generate a consistent avatar background color from a user's name.
+ * Uses a hash of the name to select from the palette.
+ * @param name User's full name
+ * @returns Hex color code for avatar background
+ */
 function avatarColor(name: string): string {
   const hash = name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
   return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
 }
 
+/**
+ * Extract first two letters of a name as initials.
+ * Used for avatar display when no avatar image is available.
+ * @param name User's full name
+ * @returns Uppercase string of first two letters
+ */
 function initials(name: string): string {
   return name.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase();
 }
 
+/**
+ * Props for UserCard component.
+ * Renders a card showing user info, avatar, and role selector.
+ */
 type Props = {
+  /** User object containing name, email, and role */
   user:          User;
+  /** Current work in progress count for this user */
   wip?:          number;
+  /** Number of stale tickets assigned to this user */
   staleCount?:   number;
+  /** Callback when role is changed */
   onRoleChange?: (id: string, role: UserRole) => void;
+  /** Click handler for navigating to user profile */
   onClick?:      () => void;
 };
 
+/**
+ * UserCard component displays user information with role management.
+ * Shows avatar, name, email, WIP count, and provides role selection.
+ * Handles stale ticket indicators and user interaction.
+ */
 export function UserCard({ user, wip = 0, staleCount = 0, onRoleChange, onClick }: Props) {
+  // State for role management and hover effects
   const [role, setRole] = useState<UserRole>(user.role as UserRole);
   const [updating, setUpdating] = useState(false);
   const [hovered, setHovered]   = useState(false);
 
+  /**
+   * Handle role change with optimistic update and error recovery.
+   * Updates local state immediately, reverts on API failure.
+   * @param newRole The new role to assign to the user
+   */
   async function handleRoleChange(newRole: UserRole) {
     const prev = role;
     setRole(newRole);
@@ -43,12 +83,14 @@ export function UserCard({ user, wip = 0, staleCount = 0, onRoleChange, onClick 
       await updateUserRole(user.id, newRole);
       onRoleChange?.(user.id, newRole);
     } catch {
+      // Revert to previous role on failure
       setRole(prev);
     } finally {
       setUpdating(false);
     }
   }
 
+  // Generate avatar color and get role metadata
   const bg   = avatarColor(user.name);
   const meta = ROLE_META[role];
 
@@ -60,11 +102,12 @@ export function UserCard({ user, wip = 0, staleCount = 0, onRoleChange, onClick 
       onMouseLeave={() => setHovered(false)}
     >
       <div style={s.top}>
-        {/* Avatar with stale dot */}
+        {/* Avatar with stale ticket indicator */}
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <div style={{ ...s.avatar, backgroundColor: bg }}>
             {initials(user.name)}
           </div>
+          {/* Orange dot indicates stale tickets assigned to user */}
           {staleCount > 0 && (
             <span
               title={`${staleCount} stale ticket${staleCount !== 1 ? 's' : ''}`}
@@ -78,7 +121,8 @@ export function UserCard({ user, wip = 0, staleCount = 0, onRoleChange, onClick 
           <span style={s.email}>{user.email ?? '—'}</span>
         </div>
 
-        {/* WIP badge */}
+        {/* WIP (Work In Progress) badge - shows current active tickets */}
+        {/* Red when overloaded (>5), blue otherwise */}
         {wip > 0 && (
           <span
             title={`${wip} ticket${wip !== 1 ? 's' : ''} in progress`}
@@ -94,9 +138,11 @@ export function UserCard({ user, wip = 0, staleCount = 0, onRoleChange, onClick 
         )}
       </div>
 
+      {/* Divider separating user info from role selector */}
       <div style={s.divider} />
 
       <div style={s.bottom}>
+        {/* Role selector dropdown for changing user role */}
         <span style={s.roleLabel}>Role</span>
         <select
           value={role}

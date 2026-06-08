@@ -1,3 +1,13 @@
+/**
+ * Zonaliser (Engineering Delivery Intelligence Dashboard) Prisma schema.
+ *
+ * Local-first architecture: All runtime queries serve from SQLite; Zoho API
+ * is only contacted during sync operations (cron every 3 hours).
+ *
+ * Rate limiting: All Zoho API calls respect the 25 req/60s sliding window limit.
+ * See src/services/rateLimiter.ts for details.
+ */
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,96 +17,166 @@ datasource db {
   url      = "file:./dev.db"
 }
 
+/**
+ * User model storing Zoho user data and local customizations.
+ *
+ * Fields `role` and other user-specific settings are stored but not derived
+ * from Zoho - they can be modified via UI (PATCH /api/users/:id/role).
+ * The `assigneeIds` field uses JSON arrays for many-to-many relationships.
+ */
 model User {
-  id        String   @id @default(cuid())
-  zohoId    String   @unique
-  name      String
-  email     String?
-  role      String   @default("OTHER")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        String   @id @default(cuid())              // Auto-generated local ID
+  zohoId    String   @unique                           // Zoho user ID, immutable
+  name      String                                      // User display name from Zoho profiles
+  email     String?                                    // Email address for identification (optional)
+  role      String   @default("OTHER")                 // 'DEV', 'QA', 'PROD', or 'OTHER' - set manually via UI
+  createdAt DateTime @default(now())                   // Record creation timestamp
+  updatedAt DateTime @updatedAt                       // Last update timestamp
 }
 
+/**
+ * Project - Zoho sprint project with local customization fields.
+ *
+ * Projects are upserted to DB during sync (src/services/zohoProjects.ts).
+ * Board assignment is local-only - changes here don't affect Zoho.
+ *
+ * Local fields:
+ * - `boardType`: 'scrum' | 'kanban' | 'other'. Used to group issues by column.
+ * - `hidden`: Boolean for hiding from UI (doesn't affect Zoho)
+ * - `displayOrder`: Integer for customizing column order in kanban view.
+ * - `statusGroups`: JSON storing status bucketing ('todo'/'doing'/'done')
+ */
 model Project {
-  id          String   @id @default(cuid())
-  zohoId      String   @unique
-  name        String
-  prefix      String?
-  status      String   @default("active")
-  boardType   String   @default("scrum")
-  description String?
-  ownerName   String?
-  ownerZohoId String?
-  createdTime String?
-  backlogCount Int?
-  displayOrder Int      @default(0)
-  hidden       Boolean  @default(false)
-  statusBreakdown String?
-  statusGroups    String?
-  statusMap       String? // cached StatusMapResult JSON: { map, orderedNames, statusGroups }
-  rawData     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id          String   @id @default(cuid())              // Auto-generated local ID
+  zohoId      String   @unique                           // Zoho project identifier, immutable
+  name        String                                      // Project/display name from Zoho
+  prefix      String?                                    // Zoho project prefix (optional)
+  status      String   @default("active")                 // 'active' or other Zoho statuses
+  boardType   String   @default("scrum")                 // Local field: 'scrum' | 'kanban' | 'other'
+  description String?                                    // Project description from Zoho (optional)
+  ownerName   String?                                    // Project owner name from Zoho (optional)
+  ownerZohoId String?                                    // Owner's zohoId from Zoho (optional)
+  createdTime String?                                    // Project creation timestamp from Zoho
+  backlogCount Int?                                       // Backlog ticket count from Zoho (optional)
+  displayOrder Int      @default(0)                      // Local ordering for kanban columns
+  hidden       Boolean  @default(false)                  // Local visibility flag (doesn't affect Zoho)
+  statusBreakdown String?                                // Status distribution from Zoho sync (optional)
+  statusGroups    String?                                // JSON: { map, orderedNames, statusGroups } - computed status buckets
+  statusMap       String?                                // cached StatusMapResult JSON from Zoho sync (optional)
+  rawData     String?                                    // Raw Zoho response stored as JSON (optional, debugging)
+  createdAt   DateTime @default(now())                   // Record creation timestamp
+  updatedAt   DateTime @updatedAt                       // Last update timestamp
 }
 
+/**
+ * Sprint - Represents a sprint from Zoho Sprints (current and historical).
+ *
+ * The 'current' sprint is determined by date comparison against Zoho's currentSprintStartDate.
+ * All other sprints are historical and auto-archived when they end.
+ * Sprints are upserted to DB during sync (src/services/zohoSprints.ts).
+ */
 model Sprint {
-  id              String   @id @default(cuid())
-  zohoId          String
-  projectZohoId   String
-  projectName     String
-  name            String
-  status          String   @default("active")
-  startDate       String?
-  endDate         String?
-  totalTickets    Int      @default(0)
-  statusBreakdown String?
-  rawData         String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id              String   @id @default(cuid())              // Auto-generated local ID
+  zohoId          String                                      // Unique Zoho sprint identifier, immutable
+  projectZohoId   String                                      // Parent project's zohoId (foreign key)
+  projectName     String                                      // Project name from Zoho
+  name            String                                      // Sprint name from Zoho (e.g., "Sprint 14")
+  status          String   @default("active")                 // 'active', 'past', or 'future'
+  startDate       String?                                    // Sprint start date (ISO string)
+  endDate         String?                                    // Sprint end date (ISO string, null for future sprints)
+  totalTickets    Int      @default(0)                       // Total tickets in sprint from Zoho
+  statusBreakdown String?                                    // Status distribution from Zoho sync (optional)
+  rawData         String?                                    // Raw Zoho response stored as JSON for debugging/debugging (optional)
+  createdAt       DateTime @default(now())                   // Record creation timestamp
+  updatedAt       DateTime @updatedAt                       // Last update timestamp
 
-  @@unique([zohoId, projectZohoId])
+  @@unique([zohoId, projectZohoId])                           // Unique constraint on Zoho sprint IDs
 }
 
+/**
+ * Epic - User stories grouped under epics in Zoho Sprints.
+ *
+ * Epics are high-level containers for multiple issues/stories within a project.
+ * They are synced from Zoho but can be filtered out at query time if not needed.
+ * Stored separately to avoid inflating the Issue table with parent relationships.
+ */
 model Epic {
-  id            String   @id @default(cuid())
-  zohoId        String
-  projectZohoId String
-  name          String
-  syncedAt      DateTime @default(now()) @updatedAt
+  id            String   @id @default(cuid())              // Auto-generated local ID
+  zohoId        String                                      // Unique Zoho epic identifier, immutable
+  projectZohoId String                                      // Parent project's zohoId (foreign key)
+  name          String                                      // Epic name from Zoho
+  syncedAt      DateTime @default(now()) @updatedAt          // Last sync timestamp
 
-  @@unique([zohoId, projectZohoId])
+  @@unique([zohoId, projectZohoId])                         // Unique constraint on Zoho epic IDs
 }
 
+/**
+ * Issue - Work items from Zoho Sprints (Stories, Bugs, Tasks).
+ *
+ * This is the core entity for dashboard analytics. Issues are upserted based on
+ * (zohoId, sprintZohoId) composite key during sync. Multiple issues can exist per
+ * sprint (current + historical sprints may both have active tickets).
+ *
+ * Status grouping: Issues are bucketed into 'todo', 'doing', or 'done' based on
+ * Zoho status. This computed field is used for sprint health metrics and WIP tracking.
+ *
+ * Staleness: `isStale` (not stored) is computed at query time from createdAt.
+ * Default threshold: 7 days since last update (configurable via staleDays param).
+ *
+ * Delayed tasks: `delayedDays` (not stored) is computed from endDate and current date.
+ *
+ * Assignees: Stored as JSON array string '["z1","z2"]' for many-to-many relationships.
+ * Use json_each() in Prisma queries to filter by assignee.
+ */
 model Issue {
-  id             String   @id @default(cuid())
-  zohoId         String
-  sprintZohoId   String
-  projectZohoId  String
-  itemNo         String
-  title          String
-  status         String
-  statusGroup    String              // "todo" | "doing" | "done"
-  epicZohoId     String?
-  creatorZohoId  String?
-  assigneeIds    String              // JSON array: ["zohoId1", "zohoId2"]
-  createdAt      String?             // Zoho creation timestamp (ISO string)
-  endDate        String?             // Target date (ISO string)
-  syncedAt       DateTime @default(now()) @updatedAt
+  id             String   @id @default(cuid())              // Auto-generated local ID
+  zohoId         String                                      // Unique Zoho issue identifier, immutable
+  sprintZohoId   String                                      // Parent sprint's zohoId (foreign key)
+  projectZohoId  String                                      // Project's zohoId (via sprint)
+  itemNo         String                                      // Zoho item number/key (e.g., "PROJ-123")
+  title          String                                      // Issue title from Zoho
+  status         String                                      // One of: todo, in_progress (doing), done, closed, resolved
+  statusGroup    String                                      // Computed: 'todo' | 'doing' | 'done' based on status
+  epicZohoId     String?                                    // Parent Epic's zohoId if assigned to one (optional)
+  creatorZohoId  String?                                    // Creator's Zoho user ID (optional, not always returned by API)
+  assigneeIds    String                                      // JSON array: '["z1","z2"]' - one or more assignees
+  createdAt      String?                                    // Zoho creation timestamp (ISO string, used for staleness calc)
+  endDate        String?                                    // Target/due date (ISO string, null if not set)
+  syncedAt       DateTime @default(now()) @updatedAt        // Last sync timestamp
 
-  @@unique([zohoId, sprintZohoId])
+  @@unique([zohoId, sprintZohoId])                          // Unique constraint prevents duplicate Zoho issues per sprint
 }
 
+/**
+ * Settings - Key-value store for application configuration.
+ *
+ * Used to store runtime settings that don't require Zoho sync:
+ * - User preferences (theme, notifications)
+ * - Dashboard layouts and views
+ * - Staleness thresholds (staleDays for issue queries)
+ * - Rate limit retry configuration
+ *
+ * No unique constraint - multiple rows allowed with different keys.
+ */
 model Settings {
-  key       String   @id
-  value     String
-  updatedAt DateTime @updatedAt
+  key       String   @id                                    // Setting key (e.g., 'staleDays', 'theme')
+  value     String                                      // JSON/string value for the setting
+  updatedAt DateTime @updatedAt                           // Last update timestamp
 }
 
+/**
+ * BurndownSnapshot - Historical burndown data points per sprint.
+ *
+ * One row per (sprint, date) combination storing cumulative completed work.
+ * Used for generating burndown charts and tracking sprint progress over time.
+ *
+ * Snapshots are created during sync from Zoho's issue completion data.
+ */
 model BurndownSnapshot {
-  sprintZohoId String
-  date         String  // YYYY-MM-DD
-  doneCount    Int
-  totalCount   Int
+  sprintZohoId String                                      // Sprint identifier (foreign key)
+  date         String                                     // Date in YYYY-MM-DD format
+  doneCount    Int                                        // Number of completed issues on this date
+  totalCount   Int                                        // Total issues in sprint on this date
 
-  @@id([sprintZohoId, date])
+  @@id([sprintZohoId, date])                               // Composite primary key
 }

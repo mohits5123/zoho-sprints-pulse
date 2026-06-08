@@ -1,3 +1,23 @@
+/**
+ * Projects page component.
+ *
+ * Displays all projects (pods) from Zoho Sprints with their board type (scrum/kanban/other),
+ * active sprints, and board item counts for kanban boards. Supports drag-and-drop reordering
+ * and hiding/unhiding projects.
+ *
+ * Features:
+ * - Lists all synced projects in display order
+ * - Shows active sprints for scrum boards or kanban board item counts
+ * - Allows changing board type (scrum/kanban/other) via dropdown
+ * - Supports hiding projects (moves to hidden section)
+ * - Drag-and-drop reordering to update display order
+ * - Resync button to refresh data from Zoho
+ *
+ * Data flows:
+ * - Projects are fetched from local SQLite (served by backend)
+ * - Board type changes are persisted via API (fire-and-forget)
+ * - Hidden projects are stored locally and synced on next full sync
+ */
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -6,9 +26,19 @@ import {
 } from '../api/client';
 import { LastSyncedFooter } from '../components/LastSyncedFooter';
 
+/**
+ * Valid board types for projects.
+ * - scrum: Traditional sprint-based workflow with active sprints
+ * - kanban: Continuous flow with todo/doing/done status groups
+ * - other: Non-standard board type
+ */
 const BOARD_TYPES = ['scrum', 'kanban', 'other'] as const;
 type BoardType = (typeof BOARD_TYPES)[number];
 
+/**
+ * Color mapping for board types.
+ * Used to visually distinguish scrum (blue), kanban (green), and other (gray) boards.
+ */
 const BOARD_TYPE_COLORS: Record<BoardType, string> = {
   scrum:  '#3b82f6',
   kanban: '#10b981',
