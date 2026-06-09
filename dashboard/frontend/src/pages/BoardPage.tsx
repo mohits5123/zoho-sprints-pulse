@@ -356,78 +356,80 @@ export function BoardPage() {
             </div>
           </div>
 
-          {/* Epics section */}
-          <div style={s.section}>
-            <div style={s.sectionHeader}>
-              <h2 style={s.sectionTitle}>Epics</h2>
-              {epicsLoading && <span style={s.sectionMeta}>Loading…</span>}
-              {!epicsLoading && <span style={s.sectionMeta}>{epics.length} epic{epics.length !== 1 ? 's' : ''}</span>}
+          {/* Epics section — only for scrum boards */}
+          {project?.boardType !== 'kanban' && (
+            <div style={s.section}>
+              <div style={s.sectionHeader}>
+                <h2 style={s.sectionTitle}>Epics</h2>
+                {epicsLoading && <span style={s.sectionMeta}>Loading…</span>}
+                {!epicsLoading && <span style={s.sectionMeta}>{epics.length} epic{epics.length !== 1 ? 's' : ''}</span>}
+              </div>
+
+              {epicsLoading && (
+                <div style={s.loadingCard}>
+                  <p style={s.muted}>Loading epics…</p>
+                </div>
+              )}
+
+              {!epicsLoading && epics.length > 0 && (
+                <div style={s.epicGrid}>
+                  {[...epics].sort((a, b) => {
+                    const pct = (e: typeof a) => {
+                      if (e.total === 0) return 0;
+                      const done = Object.entries(e.statusBreakdown)
+                        .filter(([st]) => e.statusGroups[st] === 'done')
+                        .reduce((s, [, n]) => s + n, 0);
+                      return done / e.total;
+                    };
+                    return pct(a) - pct(b);
+                  }).map((epic) => (
+                    <EpicCard
+                      key={epic.id}
+                      epic={epic}
+                      staleDays={staleDays}
+                      onStatusClick={(status) => {
+                        const params = baseIssueParams({
+                          sprintId:   selectedSprint.id,
+                          epicId:     epic.id,
+                          status,
+                          sprintName: selectedSprint.name,
+                          epicName:   epic.name,
+                        });
+                        navigate(`/board/${projectId}/issues?${params}`);
+                      }}
+                      onStaleClick={() => {
+                        const params = baseIssueParams({
+                          sprintId:   selectedSprint.id,
+                          epicId:     epic.id,
+                          stale:      'true',
+                          staleDays:  String(staleDays),
+                          sprintName: selectedSprint.name,
+                          epicName:   epic.name,
+                        });
+                        if (watchedStates.length) params.set('watchedStates', watchedStates.join(','));
+                        navigate(`/board/${projectId}/issues?${params}`);
+                      }}
+                      onUserClick={(userId, userName) => {
+                        const params = baseIssueParams({
+                          sprintId:   selectedSprint.id,
+                          epicId:     epic.id,
+                          userId,
+                          userName,
+                          sprintName: selectedSprint.name,
+                          epicName:   epic.name,
+                        });
+                        navigate(`/board/${projectId}/issues?${params}`);
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {!epicsLoading && epics.length === 0 && (
+                <p style={s.muted}>No epics found for this sprint.</p>
+              )}
             </div>
-
-            {epicsLoading && (
-              <div style={s.loadingCard}>
-                <p style={s.muted}>Loading epics…</p>
-              </div>
-            )}
-
-            {!epicsLoading && epics.length > 0 && (
-              <div style={s.epicGrid}>
-                {[...epics].sort((a, b) => {
-                  const pct = (e: typeof a) => {
-                    if (e.total === 0) return 0;
-                    const done = Object.entries(e.statusBreakdown)
-                      .filter(([st]) => e.statusGroups[st] === 'done')
-                      .reduce((s, [, n]) => s + n, 0);
-                    return done / e.total;
-                  };
-                  return pct(a) - pct(b);
-                }).map((epic) => (
-                  <EpicCard
-                    key={epic.id}
-                    epic={epic}
-                    staleDays={staleDays}
-                    onStatusClick={(status) => {
-                      const params = baseIssueParams({
-                        sprintId:   selectedSprint.id,
-                        epicId:     epic.id,
-                        status,
-                        sprintName: selectedSprint.name,
-                        epicName:   epic.name,
-                      });
-                      navigate(`/board/${projectId}/issues?${params}`);
-                    }}
-                    onStaleClick={() => {
-                      const params = baseIssueParams({
-                        sprintId:   selectedSprint.id,
-                        epicId:     epic.id,
-                        stale:      'true',
-                        staleDays:  String(staleDays),
-                        sprintName: selectedSprint.name,
-                        epicName:   epic.name,
-                      });
-                      if (watchedStates.length) params.set('watchedStates', watchedStates.join(','));
-                      navigate(`/board/${projectId}/issues?${params}`);
-                    }}
-                    onUserClick={(userId, userName) => {
-                      const params = baseIssueParams({
-                        sprintId:   selectedSprint.id,
-                        epicId:     epic.id,
-                        userId,
-                        userName,
-                        sprintName: selectedSprint.name,
-                        epicName:   epic.name,
-                      });
-                      navigate(`/board/${projectId}/issues?${params}`);
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-
-            {!epicsLoading && epics.length === 0 && (
-              <p style={s.muted}>No epics found for this sprint.</p>
-            )}
-          </div>
+          )}
         </div>
       )}
 
