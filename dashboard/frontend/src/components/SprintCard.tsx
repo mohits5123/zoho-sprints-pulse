@@ -42,6 +42,8 @@ interface SprintCardProps {
   staleCount?: number;
   /** Callback when a status row is clicked (optional) */
   onStatusClick?: (status: string) => void;
+  /** Whether the board is a kanban board (optional) */
+  isKanban?: boolean;
   /** Callback when stale badge is clicked */
   onStaleClick?: () => void;
   /** Array of users assigned to issues in this sprint */

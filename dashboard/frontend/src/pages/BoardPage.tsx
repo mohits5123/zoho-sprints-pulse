@@ -110,7 +110,8 @@ export function BoardPage() {
         }
         // Auto-select if there's exactly one sprint (or it's kanban)
         if (p.boardType === 'kanban') {
-          setSelectedSprint(buildKanbanSprint(p));
+           setSelectedSprint(buildKanbanSprint(p));
+           setSprintStatusGroups(p.statusGroups ? JSON.parse(p.statusGroups) : {});
         } else if (p.activeSprints.length === 1) {
           setSelectedSprint(p.activeSprints[0]);
         }
@@ -217,63 +218,69 @@ export function BoardPage() {
               <h2 style={s.sectionTitle}>Sprint Overview</h2>
             </div>
             <div style={s.grid}>
-              <SprintCard
-                sprint={selectedSprint}
-                hideProjectName
-                staleCount={epics.reduce((sum, e) => sum + e.staleCount, 0)}
-                onStaleClick={() => {
-                  const params = baseIssueParams({
-                    sprintId:   selectedSprint.id,
-                    stale:      'true',
-                    staleDays:  String(staleDays),
-                    sprintName: selectedSprint.name,
-                  });
-                  if (watchedStates.length) params.set('watchedStates', watchedStates.join(','));
-                  navigate(`/board/${projectId}/issues?${params}`);
-                }}
-                users={(() => {
-                  const seen = new Map<string, { name: string; role: string }>();
-                  for (const epic of epics) {
-                    for (const u of epic.users) {
-                      if (!seen.has(u.id)) seen.set(u.id, { name: u.name, role: u.role });
-                    }
-                  }
-                  const all = Array.from(seen.entries()).map(([id, { name, role }]) => ({ id, name, role }));
-                  return sortByRole(all);
-                })()}
-                onUserClick={(userId, userName) => {
-                  const params = baseIssueParams({
-                    sprintId:   selectedSprint.id,
-                    userId,
-                    userName,
-                    sprintName: selectedSprint.name,
-                  });
-                  navigate(`/board/${projectId}/issues?${params}`);
-                }}
-                onStatusClick={(status) => {
-                  const params = baseIssueParams({
-                    sprintId:   selectedSprint.id,
-                    status,
-                    sprintName: selectedSprint.name,
-                  });
-                  navigate(`/board/${projectId}/issues?${params}`);
-                }}
-              />
-
-              {!epicsLoading && epics.length > 0 && (
-                <SprintProgressCard
-                  epics={epics}
-                  statusGroups={sprintStatusGroups}
-                  onGroupClick={(group) => {
+                 <SprintCard
+                  sprint={selectedSprint}
+                  hideProjectName
+                  staleCount={epics.reduce((sum, e) => sum + e.staleCount, 0)}
+                  isKanban={project?.boardType === 'kanban'}
+                  onStaleClick={() => {
                     const params = baseIssueParams({
-                      sprintId:    selectedSprint.id,
-                      statusGroup: group,
-                      sprintName:  selectedSprint.name,
+                      sprintId:   selectedSprint.id,
+                      stale:      'true',
+                      staleDays:  String(staleDays),
+                      sprintName: selectedSprint.name,
+                    });
+                    if (watchedStates.length) params.set('watchedStates', watchedStates.join(','));
+                    navigate(`/board/${projectId}/issues?${params}`);
+                  }}
+                  users={(() => {
+                    const seen = new Map<string, { name: string; role: string }>();
+                    for (const epic of epics) {
+                      for (const u of epic.users) {
+                        if (!seen.has(u.id)) seen.set(u.id, { name: u.name, role: u.role });
+                      }
+                    }
+                    const all = Array.from(seen.entries()).map(([id, { name, role }]) => ({ id, name, role }));
+                    return sortByRole(all);
+                  })()}
+                  onUserClick={(userId, userName) => {
+                    const params = baseIssueParams({
+                      sprintId:   selectedSprint.id,
+                      userId,
+                      userName,
+                      sprintName: selectedSprint.name,
+                    });
+                    navigate(`/board/${projectId}/issues?${params}`);
+                  }}
+                  onStatusClick={(status) => {
+                    const params = baseIssueParams({
+                      sprintId:   selectedSprint.id,
+                      status,
+                      sprintName: selectedSprint.name,
                     });
                     navigate(`/board/${projectId}/issues?${params}`);
                   }}
                 />
-              )}
+
+
+                {!epicsLoading && (epics.length > 0 || project?.boardType === 'kanban') && (
+                   <SprintProgressCard
+                     epics={epics}
+                     statusGroups={sprintStatusGroups}
+                     onGroupClick={(group) => {
+                       const params = baseIssueParams({
+                         sprintId:    selectedSprint.id,
+                         statusGroup: group,
+                         sprintName:  selectedSprint.name,
+                       });
+                       navigate(`/board/${projectId}/issues?${params}`);
+                     }}
+                     isKanban={project?.boardType === 'kanban'}
+                     statusBreakdown={project?.boardType === 'kanban' ? project.statusBreakdown : null}
+                   />
+                )}
+
+
 
               {!epicsLoading && epics.length > 0 && (() => {
                 const doneCount = epics.reduce((sum, e) => {

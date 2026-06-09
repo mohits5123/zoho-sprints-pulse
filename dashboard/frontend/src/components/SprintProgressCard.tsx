@@ -27,7 +27,7 @@ function aggregate(epics: EpicBreakdown[], statusGroups: Record<string, string>)
   const t: GroupTotals = { todo: 0, doing: 0, done: 0, total: 0 };
   for (const epic of epics) {
     for (const [status, count] of Object.entries(epic.statusBreakdown)) {
-      const g = (statusGroups[status] ?? 'todo') as Group;
+       const g = statusGroups[status] as Group;
       if (g in t) (t[g] as number) += count;
       t.total += count;
     }
@@ -42,29 +42,46 @@ interface SprintProgressCardProps {
   statusGroups: Record<string, string>;
   /** Callback when a group chip is clicked (optional) */
   onGroupClick?: (group: string) => void;
+  /** Whether the board is a kanban board (optional) */
+  isKanban?: boolean;
+  /** Raw status breakdown JSON string (optional, used for kanban) */
+  statusBreakdown?: string | null;
 }
-
+ 
 /**
  * SprintProgressCard displays aggregated sprint progress across multiple epics
  * Shows a donut chart with overall completion percentage
  * Includes segmented progress bar and interactive group chips
  * Groups statuses into 'Todo', 'In Progress', and 'Done' buckets
  */
-export function SprintProgressCard({ epics, statusGroups, onGroupClick }: SprintProgressCardProps) {
-  const totals = aggregate(epics, statusGroups);
+export function SprintProgressCard({ epics, statusGroups, onGroupClick, isKanban, statusBreakdown }: SprintProgressCardProps) {
+  const totals = statusBreakdown
+    ? (function() {
+          const parsed = (typeof statusBreakdown === 'string' ? JSON.parse(statusBreakdown) : statusBreakdown) as Record<string, number>;
+        const t: GroupTotals = { todo: 0, doing: 0, done: 0, total: 0 };
+        for (const [status, count] of Object.entries(parsed)) {
+          const g = statusGroups[status] as Group;
+          if (g in t) {
+            (t[g] as number) += count;
+          }
+          t.total += count;
+        }
+        return t;
+      })()
+    : aggregate(epics, statusGroups);
   const { total } = totals;
   const pct = total > 0 ? Math.round((totals.done / total) * 100) : 0;
-
+ 
   const segments = GROUP_ORDER.map((g) => ({
     value: totals[g],
     color: GROUP_COLORS[g],
     label: `${GROUP_LABELS[g]}: ${totals[g]}`,
   }));
-
+ 
   return (
     <div style={s.card}>
-      <p style={s.label}>Sprint Progress</p>
-
+      <p style={s.label}>{isKanban ? 'Board Progress' : 'Sprint Progress'}</p>
+ 
       <div style={s.donutWrap}>
         <DonutChart
           segments={segments}
@@ -74,7 +91,7 @@ export function SprintProgressCard({ epics, statusGroups, onGroupClick }: Sprint
           centerSub={`${totals.done} / ${total} done`}
         />
       </div>
-
+ 
       {/* Segmented bar */}
       {total > 0 && (
         <div style={s.barTrack}>
@@ -91,7 +108,7 @@ export function SprintProgressCard({ epics, statusGroups, onGroupClick }: Sprint
           })}
         </div>
       )}
-
+ 
       {/* Group chips */}
       <div style={s.chips}>
         {GROUP_ORDER.map((g) => (
@@ -106,11 +123,12 @@ export function SprintProgressCard({ epics, statusGroups, onGroupClick }: Sprint
           />
         ))}
       </div>
-
+ 
       {total === 0 && <p style={s.muted}>No ticket data yet.</p>}
     </div>
   );
 }
+
 
 /**
  * Interactive chip displaying group statistics with click handler
