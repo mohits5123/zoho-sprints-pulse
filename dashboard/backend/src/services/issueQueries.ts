@@ -427,6 +427,48 @@ export async function queryIssues(
 }
 
 /**
+ * Query issues for a kanban board by project.
+ * Kanban boards don't have sprints in the traditional sense - they're continuous flow.
+ * The board items are stored as issues with sprintZohoId pointing to the kanban board.
+ *
+ * @param projectZohoId - The Zoho ID of the kanban project
+ * @param staleDays - Threshold in days for staleness (default: 7)
+ * @param watchedStates - Array of statuses to watch for staleness
+ * @param userFilter - Optional: filter by specific user (creator or assignee)
+ * @param creatorOnly - If true, only return issues created by the user
+ *
+ * @returns Array of IssueItems for all issues in the kanban board
+ */
+export async function queryKanbanIssues(
+  projectZohoId: string,
+  staleDays: number = 7,
+  watchedStates: string[] = [],
+  userFilter?: string,
+  creatorOnly?: boolean,
+): Promise<IssueItem[]> {
+  const dbIssues = await prisma.issue.findMany({
+    where: { projectZohoId },
+  });
+
+  const userMap = await buildUserMap();
+  
+  // Transform raw DB rows to enriched IssueItems with computed fields
+  const issues = dbIssues.map(i => toIssueItem(i, userMap, staleDays, watchedStates));
+  
+  // Apply optional user/creator filters
+  if (userFilter || creatorOnly) {
+    const filtered = issues.filter(issue => {
+      const matchesUserFilter = userFilter ? (issue.creator?.id === userFilter || issue.assignees?.some(a => a.id === userFilter)) : true;
+      const matchesCreatorOnly = creatorOnly ? (issue.creator?.id === userFilter) : true;
+      return matchesUserFilter && matchesCreatorOnly;
+    });
+    return filtered;
+  }
+  
+  return issues;
+}
+
+/**
  * Query epic breakdown for a sprint from local SQLite database.
  * Used by the /epics route to show Epic cards with issue distribution.
  *

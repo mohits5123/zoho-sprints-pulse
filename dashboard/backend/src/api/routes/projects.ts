@@ -13,7 +13,7 @@ import axios from 'axios';
 import prisma from '../../db/client';
 import { syncZohoProjects } from '../../services/zohoProjects';
 import { syncSprintHealth } from '../../services/zohoSprints';
-import { queryIssues, querySprintEpics } from '../../services/issueQueries';
+import { queryIssues, querySprintEpics, queryKanbanIssues } from '../../services/issueQueries';
 import { touchLastSyncedAt } from '../../services/syncStatus';
 
 const router = Router();
@@ -377,17 +377,15 @@ router.get('/:id/sprints/:sprintId/raiser-stats', async (req, res) => {
       const c = issue.creator;
       if (!c) continue;  // Skip issues without creator data
       
-      let entry: Map<string, { id: string; name: string; role: string; todo: number; doing: number; done: number }>;
-      if (!map.has(c.id)) {
+      let entry = map.get(c.id);
+      if (!entry) {
         map.set(c.id, { id: c.id, name: c.name, role: c.role, todo: 0, doing: 0, done: 0 });
         entry = map.get(c.id)!;
-      } else {
-        entry = map.get(c.id);
       }
 
-      if      (issue.statusGroup === 'todo')  entry!.todo++;
-      else if (issue.statusGroup === 'doing') entry!.doing++;
-      else if (issue.statusGroup === 'done')  entry!.done++;
+      if      (issue.statusGroup === 'todo')  entry.todo++;
+      else if (issue.statusGroup === 'doing') entry.doing++;
+      else if (issue.statusGroup === 'done')  entry.done++;
     }
 
     // Sort by total tickets raised (todo + doing + done), descending
@@ -520,10 +518,88 @@ router.get('/:id', async (req, res) => {
     });
 
     res.json({ project: { ...project, projNo: extractProjNo(project.rawData), activeSprints } });
-  } catch (err) {
+   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('❌ Project fetch failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
+  }
+});
+
+/**
+ * GET /api/projects/:id/kanban-user-stats — Per-user workload stats for a kanban board.
+ * @route GET /api/projects/:id/kanban-user-stats?staleDays=N (optional)
+ * @method GET
+ * @param {string} id - Project's primary DB id (not zohoId)
+ * @query staleDays (optional, default: 7) - Days since last update to consider issue stale
+ * @query watchedStates (optional) - Comma-separated list of statuses to watch
+ * @query userId (optional) - Filter by user (creator or assignee)
+ * @query creatorOnly (optional, true/false) - Only return issues created by user
+ * @returns {Object} - Per-user workload breakdown for kanban board
+ *   {
+ *     users: Array<{ id, name, role, todo, doing, done, stale }> - Sorted by active load
+ *     totalStaleIssues: number - Count of UNIQUE stale issues
+ *   }
+ * @notes
+ *   - Aggregates per assignee (Field.Assignees[]), NOT creator
+ *   - Used for kanban board user load cards
+ *   - Kanban boards have no sprints - issues flow continuously through status groups
+ * @auth Required (OAuth token validation)
+ */
+router.get('/:id/kanban-user-stats', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const staleDays = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
+    const watchedStates = req.query.watchedStates ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean) : [];
+    const userIdFilter = req.query.userId ? String(req.query.userId) : undefined;
+    const creatorOnly = req.query.creatorOnly === 'true';
+
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
+
+    // Query kanban issues (all issues for this project, no sprint filter)
+    const issues = await queryKanbanIssues(project.zohoId, staleDays, watchedStates, userIdFilter, creatorOnly);
+
+    // Aggregate per assignee only (not creators)
+    const assigneeMap = new Map<string, {
+      id: string; name: string; role: string;
+      todo: number; doing: number; done: number; stale: number;
+    }>();
+
+    for (const issue of issues) {
+      if (!issue.assignees) continue;
+      
+      for (const user of issue.assignees) {
+        if (!user || !user.id || user.id === '-1') continue;
+        
+        let entry = assigneeMap.get(user.id);
+        if (!entry) {
+          assigneeMap.set(user.id, { id: user.id, name: user.name, role: user.role, todo: 0, doing: 0, done: 0, stale: 0 });
+          entry = assigneeMap.get(user.id)!;
+        }
+
+        if (issue.statusGroup === 'todo')  entry.todo++;
+        else if (issue.statusGroup === 'doing') entry.doing++;
+        else if (issue.statusGroup === 'done') entry.done++;
+        
+        if (issue.isStale) entry.stale++;
+      }
+    }
+
+    // Sort by active load (todo + doing) descending, then by total
+    const users = [...assigneeMap.values()].sort((a, b) => {
+      const loadDiff = (b.todo + b.doing) - (a.todo + a.doing);
+      return loadDiff !== 0 ? loadDiff : 
+             (b.todo + b.doing + b.done) - (a.todo + a.doing + a.done);
+    });
+
+    // Count unique stale issues
+    const totalStaleIssues = issues.filter((i) => i.isStale).length;
+
+    res.json({ users, totalStaleIssues });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('❌ Kanban user stats fetch failed:', msg);
+    res.status(500).json({ error: msg });
   }
 });
 

@@ -311,6 +311,7 @@ export function BoardPage() {
                   });
                   navigate(`/board/${projectId}/issues?${params}`);
                 }}
+                isKanban={project?.boardType === 'kanban'}
               />
 
               <UserCompletionCard

@@ -508,6 +508,39 @@ export async function fetchUserStats(
 }
 
 /**
+ * Fetch user workload statistics for a kanban board.
+ *
+ * @param projectId - The Zoho ID of the kanban project.
+ * @param staleDays - Threshold for counting stale issues (default 7 days).
+ * @param watchedStates - Array of statuses to include in the calculation.
+ * @param userId - Optional: filter by specific user (creator or assignee).
+ * @param creatorOnly - If true, only return issues created by the user.
+ *
+ * @returns Array of user stats and total stale issue count.
+ *
+ * @remarks
+ * Kanban boards don't have sprints - issues flow continuously through status groups.
+ * This function aggregates workload by assignee for all issues in the project.
+ */
+export async function fetchKanbanUserStats(
+  projectId: string,
+  staleDays: number = 7,
+  watchedStates: string[] = [],
+  userId?: string,
+  creatorOnly?: boolean,
+): Promise<{ users: UserLoadStat[]; totalStaleIssues: number }> {
+  const params: Record<string, string | number> = { staleDays };
+  if (watchedStates.length) params.watchedStates = watchedStates.join(',');
+  if (userId) params.userId = userId;
+  if (creatorOnly) params.creatorOnly = 'true';
+  const res = await apiClient.get<{ users: UserLoadStat[]; totalStaleIssues: number }>(
+    `/projects/${projectId}/kanban-user-stats`,
+    { params },
+  );
+  return res.data;
+}
+
+/**
  * Fetch issue creator statistics for a sprint.
  *
  * @param projectId - The Zoho ID of the project.

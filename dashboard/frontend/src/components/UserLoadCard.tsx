@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { fetchUserStats, type UserLoadStat } from '../api/client';
+import { fetchUserStats, fetchKanbanUserStats, type UserLoadStat } from '../api/client';
 import { roleColor } from './UserAvatar';
 
 /**
@@ -31,13 +31,15 @@ function initials(name: string) {
 /**
  * Props for the Bar component rendering individual user load rows.
  */
-function Bar({ user, maxActive, onClick }: {
+function Bar({ user, maxActive, onClick, isKanban }: {
   /** User load statistics */
   user:      UserLoadStat;
   /** Maximum active tickets across all users (for scaling bars) */
   maxActive: number;
   /** Click handler to navigate to user profile */
   onClick:   () => void;
+  /** Whether this is a kanban board (hide done states) */
+  isKanban: boolean;
 }) {
   const active = user.todo + user.doing;
   const total  = active + user.done;
@@ -97,8 +99,8 @@ function Bar({ user, maxActive, onClick }: {
               title={`${user.doing} in progress`}
             />
           )}
-          {/* Done shown as a fainter track to the right */}
-          {user.done > 0 && (
+          {/* Done segment (green, fainter) - hidden for kanban */}
+          {!isKanban && user.done > 0 && (
             <div
               style={{ width: `${Math.max(doneW * 0.4, 2)}%`, backgroundColor: GROUP_COLORS.done + '66', ...b.seg }}
               title={`${user.done} done`}
@@ -107,11 +109,11 @@ function Bar({ user, maxActive, onClick }: {
         </div>
       </div>
 
-      {/* Ticket counts for each status */}
+      {/* Ticket counts for each status (done hidden for kanban) */}
       <div style={b.counts}>
         {user.todo > 0  && <span style={{ color: GROUP_COLORS.todo  }}>{user.todo}</span>}
         {user.doing > 0 && <span style={{ color: GROUP_COLORS.doing }}>{user.doing}</span>}
-        {user.done > 0  && <span style={{ color: GROUP_COLORS.done  }}>{user.done}</span>}
+        {!isKanban && user.done > 0 && <span style={{ color: GROUP_COLORS.done }}>{user.done}</span>}
       </div>
     </div>
   );
@@ -127,11 +129,12 @@ function Bar({ user, maxActive, onClick }: {
  * @param staleDays - Number of days to consider tickets as stale (default: 7)
  * @param onUserClick - Callback when a user row is clicked
  */
-export function UserLoadCard({ projectId, sprintId, staleDays = 7, onUserClick }: {
+export function UserLoadCard({ projectId, sprintId, staleDays = 7, onUserClick, isKanban }: {
   projectId:   string;
   sprintId:    string;
   staleDays?:  number;
   onUserClick: (userId: string, userName: string) => void;
+  isKanban: boolean;
 }) {
   // State for fetching and displaying user load statistics
   const [users, setUsers]   = useState<UserLoadStat[]>([]);
@@ -140,17 +143,28 @@ export function UserLoadCard({ projectId, sprintId, staleDays = 7, onUserClick }
 
   useEffect(() => {
     setLoading(true);
-    fetchUserStats(projectId, sprintId, staleDays)
-      .then(({ users }) => setUsers(users))
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [projectId, sprintId, staleDays]);
+    if (isKanban) {
+      fetchKanbanUserStats(projectId, staleDays)
+        .then(({ users }) => setUsers(users))
+        .catch((e) => setError(e.message))
+        .finally(() => setLoading(false));
+    } else {
+      fetchUserStats(projectId, sprintId, staleDays)
+        .then(({ users }) => setUsers(users))
+        .catch((e) => setError(e.message))
+        .finally(() => setLoading(false));
+    }
+  }, [projectId, sprintId, staleDays, isKanban]);
 
   // Calculate metrics from user data
   const maxActive = users.reduce((m, u) => Math.max(m, u.todo + u.doing), 0);
   const totalIssues = users.reduce((s, u) => s + u.todo + u.doing + u.done, 0);
   // Count users with more than 5 active tickets (overloaded threshold)
   const overloaded  = users.filter((u) => u.todo + u.doing > 5).length;
+  // Filter out users with 0 issues (todo + doing + done for scrum, todo + doing for kanban)
+  const usersWithIssues = isKanban
+    ? users.filter((u) => u.todo + u.doing > 0)
+    : users.filter((u) => u.todo + u.doing + u.done > 0);
 
   return (
     <div style={s.card}>
@@ -158,8 +172,8 @@ export function UserLoadCard({ projectId, sprintId, staleDays = 7, onUserClick }
       <div style={s.headerRow}>
         <div>
           <p style={s.label}>User Load</p>
-          {!loading && users.length > 0 && (
-            <p style={s.sub}>{users.length} contributors · {totalIssues} tickets</p>
+          {!loading && usersWithIssues.length > 0 && (
+            <p style={s.sub}>{usersWithIssues.length} contributors · {totalIssues} tickets</p>
           )}
         </div>
         {overloaded > 0 && (
@@ -169,23 +183,25 @@ export function UserLoadCard({ projectId, sprintId, staleDays = 7, onUserClick }
 
       {/* Legend explaining color coding for status groups */}
       <div style={s.legend}>
-        {(['todo', 'doing', 'done'] as const).map((g) => (
-          <span key={g} style={s.legendItem}>
-            <span style={{ ...s.dot, backgroundColor: GROUP_COLORS[g] + (g === 'done' ? '66' : '') }} />
-            {GROUP_LABELS[g]}
-          </span>
-        ))}
+        {usersWithIssues.length > 0
+          ? (['todo', 'doing', 'done'] as const).map((g) => (
+              <span key={g} style={s.legendItem}>
+                <span style={{ ...s.dot, backgroundColor: GROUP_COLORS[g] + (g === 'done' ? '66' : '') }} />
+                {GROUP_LABELS[g]}
+              </span>
+            ))
+          : <p style={s.muted}>No assignee data for this sprint.</p>}
       </div>
 
       {/* User load rows or loading/error messages */}
       <div style={s.list}>
         {loading && <p style={s.muted}>Loading user stats…</p>}
         {error   && <p style={s.muted}>Failed to load: {error}</p>}
-        {!loading && users.length === 0 && !error && (
+        {!loading && usersWithIssues.length === 0 && !error && (
           <p style={s.muted}>No assignee data for this sprint.</p>
         )}
-        {!loading && users.map((u) => (
-          <Bar key={u.id} user={u} maxActive={maxActive} onClick={() => onUserClick(u.id, u.name)} />
+        {!loading && usersWithIssues.map((u) => (
+          <Bar key={u.id} user={u} maxActive={maxActive} onClick={() => onUserClick(u.id, u.name)} isKanban={isKanban} />
         ))}
       </div>
     </div>
