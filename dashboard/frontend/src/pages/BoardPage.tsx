@@ -28,7 +28,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { fetchProject, fetchSprintEpics, fetchSyncStatus, type EpicBreakdown, type Project, type SprintSnapshot } from '../api/client';
+import { fetchProject, fetchSprintEpics, fetchSyncStatus, fetchKanbanStaleCount, type EpicBreakdown, type Project, type SprintSnapshot } from '../api/client';
 import { SprintCard } from '../components/SprintCard';
 import { EpicCard } from '../components/EpicCard';
 import { SprintProgressCard } from '../components/SprintProgressCard';
@@ -84,6 +84,7 @@ export function BoardPage() {
   const [sprintStatusGroups, setSprintStatusGroups] = useState<Record<string, string>>({});
   const [showStaleModal, setShowStaleModal] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [kanbanStaleCount, setKanbanStaleCount] = useState<number | null>(null);
 
   // Stale config — loaded from localStorage once project is known
   const [staleConfig, setStaleConfig] = useState<StaleConfig>({ days: 7, watchedStates: [] });
@@ -110,8 +111,8 @@ export function BoardPage() {
         }
         // Auto-select if there's exactly one sprint (or it's kanban)
         if (p.boardType === 'kanban') {
-           setSelectedSprint(buildKanbanSprint(p));
-           setSprintStatusGroups(p.statusGroups ? JSON.parse(p.statusGroups) : {});
+            setSelectedSprint(buildKanbanSprint(p));
+            setSprintStatusGroups(p.statusGroups ? JSON.parse(p.statusGroups) : {});
         } else if (p.activeSprints.length === 1) {
           setSelectedSprint(p.activeSprints[0]);
         }
@@ -119,6 +120,23 @@ export function BoardPage() {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [projectId]);
+
+  // Fetch stale count for kanban when staleDays or watchedStates changes
+  useEffect(() => {
+    if (!projectId || !project || project.boardType !== 'kanban') {
+      setKanbanStaleCount(null);
+      return;
+    }
+    console.log('🔍 Fetching kanban stale count for project:', projectId, 'with staleDays:', staleDays, 'watchedStates:', watchedStates);
+    fetchKanbanStaleCount(projectId, { staleDays: staleDays, watchedStates })
+      .then(({ staleCount }) => {
+        console.log('✅ Kanban stale count:', staleCount);
+        setKanbanStaleCount(staleCount);
+      })
+      .catch((err) => {
+        console.error('❌ Failed to fetch kanban stale count:', err);
+      });
+  }, [projectId, project?.boardType, staleDays, watchedStates.join(',')]);
 
   // Fetch epics whenever a scrum sprint is selected, staleDays, or watchedStates changes
   useEffect(() => {
@@ -218,21 +236,21 @@ export function BoardPage() {
               <h2 style={s.sectionTitle}>Sprint Overview</h2>
             </div>
             <div style={s.grid}>
-                 <SprintCard
-                  sprint={selectedSprint}
-                  hideProjectName
-                  staleCount={epics.reduce((sum, e) => sum + e.staleCount, 0)}
-                  isKanban={project?.boardType === 'kanban'}
-                  onStaleClick={() => {
-                    const params = baseIssueParams({
-                      sprintId:   selectedSprint.id,
-                      stale:      'true',
-                      staleDays:  String(staleDays),
-                      sprintName: selectedSprint.name,
-                    });
-                    if (watchedStates.length) params.set('watchedStates', watchedStates.join(','));
-                    navigate(`/board/${projectId}/issues?${params}`);
-                  }}
+                  <SprintCard
+                    sprint={selectedSprint}
+                    hideProjectName
+                    staleCount={project?.boardType === 'kanban' ? (kanbanStaleCount ?? 0) : epics.reduce((sum, e) => sum + e.staleCount, 0)}
+                    isKanban={project?.boardType === 'kanban'}
+                    onStaleClick={() => {
+                      const params = baseIssueParams({
+                        stale:      'true',
+                        staleDays:  String(staleDays),
+                        sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                        sprintName: selectedSprint.name,
+                      });
+                      if (watchedStates.length) params.set('watchedStates', watchedStates.join(','));
+                      navigate(`/board/${projectId}/issues?${params}`);
+                    }}
                   users={(() => {
                     const seen = new Map<string, { name: string; role: string }>();
                     for (const epic of epics) {
@@ -243,41 +261,40 @@ export function BoardPage() {
                     const all = Array.from(seen.entries()).map(([id, { name, role }]) => ({ id, name, role }));
                     return sortByRole(all);
                   })()}
-                  onUserClick={(userId, userName) => {
-                    const params = baseIssueParams({
-                      sprintId:   selectedSprint.id,
-                      userId,
-                      userName,
-                      sprintName: selectedSprint.name,
-                    });
-                    navigate(`/board/${projectId}/issues?${params}`);
-                  }}
-                  onStatusClick={(status) => {
-                    const params = baseIssueParams({
-                      sprintId:   selectedSprint.id,
-                      status,
-                      sprintName: selectedSprint.name,
-                    });
-                    navigate(`/board/${projectId}/issues?${params}`);
-                  }}
+                    onUserClick={(userId, userName) => {
+                      const params = baseIssueParams({
+                        userId,
+                        userName,
+                        sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                        sprintName: selectedSprint.name,
+                      });
+                      navigate(`/board/${projectId}/issues?${params}`);
+                    }}
+                    onStatusClick={(status) => {
+                      const params = baseIssueParams({
+                        status,
+                        sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                        sprintName: selectedSprint.name,
+                      });
+                      navigate(`/board/${projectId}/issues?${params}`);
+                    }}
                 />
 
 
                 {!epicsLoading && (epics.length > 0 || project?.boardType === 'kanban') && (
-                   <SprintProgressCard
-                     epics={epics}
-                     statusGroups={sprintStatusGroups}
-                     onGroupClick={(group) => {
-                       const params = baseIssueParams({
-                         sprintId:    selectedSprint.id,
-                         statusGroup: group,
-                         sprintName:  selectedSprint.name,
-                       });
-                       navigate(`/board/${projectId}/issues?${params}`);
-                     }}
-                     isKanban={project?.boardType === 'kanban'}
-                     statusBreakdown={project?.boardType === 'kanban' ? project.statusBreakdown : null}
-                   />
+                    <SprintProgressCard
+                      epics={epics}
+                      statusGroups={sprintStatusGroups}
+                      onGroupClick={(group) => {
+                        const params = baseIssueParams({
+                      statusGroup: group,
+                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                    });
+                    navigate(`/board/${projectId}/issues?${params}`);
+                  }}
+                  isKanban={project?.boardType === 'kanban'}
+                  statusBreakdown={project?.boardType === 'kanban' ? project.statusBreakdown : null}
+                />
                 )}
 
 
@@ -298,69 +315,72 @@ export function BoardPage() {
                 );
               })()}
 
-              <UserLoadCard
-                projectId={projectId!}
-                sprintId={selectedSprint.id}
-                staleDays={staleDays}
-                onUserClick={(userId, userName) => {
-                  const params = baseIssueParams({
-                    sprintId:   selectedSprint.id,
-                    userId,
-                    userName,
-                    sprintName: selectedSprint.name,
-                  });
-                  navigate(`/board/${projectId}/issues?${params}`);
-                }}
-                isKanban={project?.boardType === 'kanban'}
-              />
+                <UserLoadCard
+                  projectId={projectId!}
+                  sprintId={project?.boardType === 'kanban' ? '' : selectedSprint.id}
+                  staleDays={staleDays}
+                  onUserClick={(userId, userName) => {
+                    const params = baseIssueParams({
+                      userId,
+                      userName,
+                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                      sprintName: selectedSprint.name,
+                    });
+                    navigate(`/board/${projectId}/issues?${params}`);
+                  }}
+                  isKanban={project?.boardType === 'kanban'}
+                />
 
-              <UserCompletionCard
-                projectId={projectId!}
-                sprintId={selectedSprint.id}
-                staleDays={staleDays}
-                onUserClick={(userId, userName) => {
-                  const params = baseIssueParams({
-                    sprintId:   selectedSprint.id,
-                    userId,
-                    userName,
-                    sprintName: selectedSprint.name,
-                  });
-                  navigate(`/board/${projectId}/issues?${params}`);
-                }}
-              />
+                {project?.boardType !== 'kanban' && (
+                  <UserCompletionCard
+                    projectId={projectId!}
+                    sprintId={project?.boardType === 'kanban' ? '' : selectedSprint.id}
+                    staleDays={staleDays}
+                    onUserClick={(userId, userName) => {
+                      const params = baseIssueParams({
+                        userId,
+                        userName,
+                        sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                        sprintName: selectedSprint.name,
+                      });
+                      navigate(`/board/${projectId}/issues?${params}`);
+                    }}
+                  />
+                )}
 
-              <UserStaleCard
-                projectId={projectId!}
-                sprintId={selectedSprint.id}
-                staleDays={staleDays}
-                watchedStates={watchedStates}
-                onUserClick={(userId, userName) => {
-                  const params = baseIssueParams({
-                    sprintId:   selectedSprint.id,
-                    userId,
-                    userName,
-                    sprintName: selectedSprint.name,
-                    stale:      'true',
-                    staleDays:  String(staleDays),
-                  });
-                  navigate(`/board/${projectId}/issues?${params}`);
-                }}
-              />
+                <UserStaleCard
+                  projectId={projectId!}
+                  sprintId={project?.boardType === 'kanban' ? '' : selectedSprint.id}
+                  staleDays={staleDays}
+                  watchedStates={watchedStates}
+                  onUserClick={(userId, userName) => {
+                    const params = baseIssueParams({
+                      userId,
+                      userName,
+                      stale:      'true',
+                      staleDays:  String(staleDays),
+                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                      sprintName: selectedSprint.name,
+                    });
+                    navigate(`/board/${projectId}/issues?${params}`);
+                  }}
+                  isKanban={project?.boardType === 'kanban'}
+                />
 
-              <TicketRaiserCard
-                projectId={projectId!}
-                sprintId={selectedSprint.id}
-                onUserClick={(userId, userName) => {
-                  const params = baseIssueParams({
-                    sprintId:   selectedSprint.id,
-                    userId,
-                    userName,
-                    sprintName: selectedSprint.name,
-                    creatorOnly: 'true',
-                  });
-                  navigate(`/board/${projectId}/issues?${params}`);
-                }}
-              />
+                <TicketRaiserCard
+                  projectId={projectId!}
+                  sprintId={project?.boardType === 'kanban' ? '' : selectedSprint.id}
+                  onUserClick={(userId, userName) => {
+                    const params = baseIssueParams({
+                      userId,
+                      userName,
+                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                      sprintName: selectedSprint.name,
+                      creatorOnly: 'true',
+                    });
+                    navigate(`/board/${projectId}/issues?${params}`);
+                  }}
+                />
             </div>
           </div>
 

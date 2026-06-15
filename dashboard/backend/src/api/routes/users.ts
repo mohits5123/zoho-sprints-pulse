@@ -62,13 +62,14 @@ router.get('/', async (_req, res) => {
 router.get('/:id/profile', async (req, res) => {
   try {
     const staleDays = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
+    const watchedStates = req.query.watchedStates ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean) : [];
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
     const activeSprints = await prisma.sprint.findMany({ where: { status: 'active' } });
 
     // Single DB query — no Zoho calls
-    const allIssues = await queryUserIssues(user.zohoId, staleDays);
+    const allIssues = await queryUserIssues(user.zohoId, staleDays, watchedStates);
     const raisedIssues = allIssues.filter(i => i.creator?.id === user.zohoId);
 
     const todo    = allIssues.filter((i) => i.statusGroup === 'todo').length;

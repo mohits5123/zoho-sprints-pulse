@@ -80,8 +80,10 @@ export function SprintProgressCard({ epics, statusGroups, onGroupClick, isKanban
  
   return (
     <div style={s.card}>
-      <p style={s.label}>{isKanban ? 'Board Progress' : 'Sprint Progress'}</p>
- 
+      <div style={s.header}>
+        <p style={s.label}>{isKanban ? 'Board Progress' : 'Sprint Progress'}</p>
+      </div>
+  
       <div style={s.donutWrap}>
         <DonutChart
           segments={segments}
@@ -114,7 +116,6 @@ export function SprintProgressCard({ epics, statusGroups, onGroupClick, isKanban
         {GROUP_ORDER.map((g) => (
           <GroupChip
             key={g}
-            group={g}
             label={GROUP_LABELS[g]}
             color={GROUP_COLORS[g]}
             count={totals[g]}
@@ -135,9 +136,7 @@ export function SprintProgressCard({ epics, statusGroups, onGroupClick, isKanban
  * Shows group label, issue count, and percentage of total
  * Clickable when an onClick prop is provided
  */
-function GroupChip({ group, label, color, count, pct, onClick }: {
-  /** Group identifier */
-  group: string;
+function GroupChip({ label, color, count, pct, onClick }: {
   /** Human-readable label (e.g., 'Todo', 'Done') */
   label: string;
   /** Color of the group indicator */
@@ -189,6 +188,8 @@ const s: Record<string, React.CSSProperties> = {
     margin: 0, fontSize: 11, fontWeight: 600,
     color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em',
   },
+  /** Header container for label */
+  header: { display: 'flex', marginBottom: 8 },
   /** Centered wrapper for donut chart */
   donutWrap: { display: 'flex', justifyContent: 'center', alignItems: 'center' },
   /** Segmented progress bar track */

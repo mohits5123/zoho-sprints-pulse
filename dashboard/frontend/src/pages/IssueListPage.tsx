@@ -26,7 +26,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { fetchIssues, fetchProject, fetchAppConfig, type IssueItem } from '../api/client';
+import { fetchIssues, fetchIssuesKanban, fetchProject, fetchAppConfig, type IssueItem } from '../api/client';
 import { UserAvatar } from '../components/UserAvatar';
 
 type StatusGroup = 'todo' | 'doing' | 'done' | 'unknown';
@@ -71,6 +71,7 @@ export function IssueListPage() {
   const [copied, setCopied]         = useState<string | null>(null);
   const [workspaceName, setWorkspaceName] = useState('');
   const [projNo, setProjNo]         = useState('');
+  const [boardType, setBoardType]   = useState<'scrum' | 'kanban' | 'other' | null>(null);
 
   // Fetch workspace name and projNo independently (not from URL params)
   useEffect(() => {
@@ -81,20 +82,35 @@ export function IssueListPage() {
     if (!projectId) return;
     fetchProject(projectId).then(({ project }) => {
       if (project.projNo) setProjNo(project.projNo);
+      if (project.boardType) setBoardType(project.boardType as 'scrum' | 'kanban' | 'other');
     }).catch(() => {});
   }, [projectId]);
 
   useEffect(() => {
-    if (!projectId || !sprintId) return;
+    if (!projectId) return;
     setLoading(true);
-    fetchIssues(projectId, sprintId, { status, statusGroup, epicId, userId, creatorOnly, stale, staleDays, watchedStates })
-      .then(({ issues: data }) => {
-        const ORDER: Record<string, number> = { todo: 0, doing: 1, done: 2 };
-        setIssues(data.sort((a, b) => (ORDER[a.statusGroup] ?? 1) - (ORDER[b.statusGroup] ?? 1)));
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [projectId, sprintId, status, epicId, userId, creatorOnly, stale, staleDays]);
+    
+    // Determine which fetch function to use based on board type
+    if (boardType === 'kanban') {
+      fetchIssuesKanban(projectId, { status, statusGroup, epicId, userId, creatorOnly, stale, staleDays, watchedStates })
+        .then(({ issues: data }) => {
+          const ORDER: Record<string, number> = { todo: 0, doing: 1, done: 2 };
+          setIssues(data.sort((a, b) => (ORDER[a.statusGroup] ?? 1) - (ORDER[b.statusGroup] ?? 1)));
+        })
+        .catch((err) => setError(err.message))
+        .finally(() => setLoading(false));
+    } else {
+      // Scrum or other boards - use sprint-based fetching
+      if (!sprintId) return;
+      fetchIssues(projectId, sprintId, { status, statusGroup, epicId, userId, creatorOnly, stale, staleDays, watchedStates })
+        .then(({ issues: data }) => {
+          const ORDER: Record<string, number> = { todo: 0, doing: 1, done: 2 };
+          setIssues(data.sort((a, b) => (ORDER[a.statusGroup] ?? 1) - (ORDER[b.statusGroup] ?? 1)));
+        })
+        .catch((err) => setError(err.message))
+        .finally(() => setLoading(false));
+    }
+  }, [projectId, sprintId, boardType, status, epicId, userId, creatorOnly, stale, staleDays]);
 
   function copyItemUrl(url: string, itemNo: string) {
     navigator.clipboard.writeText(url).then(() => {

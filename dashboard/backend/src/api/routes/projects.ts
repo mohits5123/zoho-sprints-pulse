@@ -434,6 +434,8 @@ router.get('/:id/sprints/:sprintId/user-stats', async (req, res) => {
     const sprint = await prisma.sprint.findFirst({ where: { id: sprintId } });
     if (!sprint)  { res.status(404).json({ error: 'Sprint not found'  }); return; }
 
+    // Fetch ALL issues for this sprint (don't filter by stale here)
+    // The isStale flag will be computed correctly based on watchedStates
     const issues = await queryIssues(project.zohoId, sprint.zohoId, { staleDays, watchedStates });
 
     // Aggregate per assignee only. Creators are surfaced on the
@@ -545,6 +547,61 @@ router.get('/:id', async (req, res) => {
  *   - Kanban boards have no sprints - issues flow continuously through status groups
  * @auth Required (OAuth token validation)
  */
+/**
+ * GET /api/projects/:id/kanban/issues — Fetch issue list for a kanban board with filters.
+ * @route GET /api/projects/:id/kanban/issues?status=...&statusGroup=...&epicId=...&userId=...
+ * @method GET
+ * @param {string} id - Project's primary DB id (not zohoId)
+ * @query status (optional) - Filter by exact status string
+ * @query statusGroup (optional) - Filter by work bucket (todo/doing/done)
+ * @query epicId (optional) - Filter by Epic ID
+ * @query userId (optional) - Filter by user (creator or assignee)
+ * @query creatorOnly (optional, true/false) - Only return issues created by user
+ * @query stale (optional, true/false) - Only return issues marked as stale
+ * @query staleDays (optional, default: 7) - Days since last update to consider issue stale
+ * @query watchedStates (optional) - Comma-separated list of statuses to watch
+ * @returns {Object} - Issue list
+ *   { issues: Issue[] } - Array of issue objects matching all filter criteria
+ * @notes
+ *   - Kanban boards have no sprints - issues flow continuously through status groups
+ *   - All filters are applied at query time (status, statusGroup, epic, user, stale)
+ * @auth Required (OAuth token validation)
+ */
+router.get('/:id/kanban/issues', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
+
+    const statusFilter       = req.query.status        ? String(req.query.status)       : undefined;
+    const statusGroupFilter  = req.query.statusGroup   ? String(req.query.statusGroup)  : undefined;
+    const epicFilter         = req.query.epicId        ? String(req.query.epicId)        : undefined;
+    const userFilter         = req.query.userId        ? String(req.query.userId)        : undefined;
+    const creatorOnly        = req.query.creatorOnly   === 'true';
+    const staleOnly          = req.query.stale         === 'true';
+    const staleDays          = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
+    const watchedStates      = req.query.watchedStates ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean) : [];
+
+    const issues = await queryKanbanIssues(project.zohoId, staleDays, watchedStates, userFilter, creatorOnly);
+
+    // Apply additional filters at query time (status, statusGroup, epic, stale)
+    const filtered = issues.filter((issue): boolean => {
+      if (statusFilter      && issue.status      !== statusFilter)      return false;
+      if (statusGroupFilter && issue.statusGroup  !== statusGroupFilter) return false;
+      if (epicFilter && issue.epicId !== epicFilter) return false;
+      if (staleOnly && !issue.isStale) return false;
+      return true;
+    });
+
+    res.json({ issues: filtered });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('❌ Kanban issue fetch failed:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.get('/:id/kanban-user-stats', async (req, res) => {
   try {
     const { id } = req.params;
@@ -556,21 +613,29 @@ router.get('/:id/kanban-user-stats', async (req, res) => {
     const project = await prisma.project.findUnique({ where: { id } });
     if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
 
-    // Query kanban issues (all issues for this project, no sprint filter)
+    // Fetch ALL issues for this project (don't filter by stale here)
+    // The isStale flag will be computed correctly based on watchedStates
     const issues = await queryKanbanIssues(project.zohoId, staleDays, watchedStates, userIdFilter, creatorOnly);
 
+    // Filter issues to only those in watched states for bar graph calculation
+    const issuesInWatchedStates = issues.filter(issue => {
+      if (watchedStates.length === 0) return true; // No watched states = show all
+      return watchedStates.includes(issue.status);
+    });
+
     // Aggregate per assignee only (not creators)
+    // Only count issues in watched states (if watchedStates is configured)
     const assigneeMap = new Map<string, {
       id: string; name: string; role: string;
       todo: number; doing: number; done: number; stale: number;
     }>();
 
-    for (const issue of issues) {
+    for (const issue of issuesInWatchedStates) {
       if (!issue.assignees) continue;
       
       for (const user of issue.assignees) {
         if (!user || !user.id || user.id === '-1') continue;
-        
+
         let entry = assigneeMap.get(user.id);
         if (!entry) {
           assigneeMap.set(user.id, { id: user.id, name: user.name, role: user.role, todo: 0, doing: 0, done: 0, stale: 0 });
@@ -599,6 +664,53 @@ router.get('/:id/kanban-user-stats', async (req, res) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('❌ Kanban user stats fetch failed:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * GET /api/projects/:id/kanban/stale-count — Get count of stale issues for a kanban board.
+ * @route GET /api/projects/:id/kanban/stale-count?staleDays=...&watchedStates=...
+ * @method GET
+ * @param {string} id - Project's primary DB id (not zohoId)
+ * @query staleDays (optional, default: 7) - Days since last update to consider issue stale
+ * @query watchedStates (optional) - Comma-separated list of statuses to watch
+ * @returns {Object} - Stale count
+ *   { staleCount: number } - Count of unique stale issues
+ * @notes
+ *   - Kanban boards have no sprints - issues flow continuously through status groups
+ *   - Only counts issues assigned to someone (not unassigned)
+ * @auth Required (OAuth token validation)
+ */
+router.get('/:id/kanban/stale-count', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
+
+    const staleDays = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
+    const watchedStates = req.query.watchedStates ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean) : [];
+
+    const issues = await queryKanbanIssues(project.zohoId, staleDays, watchedStates, undefined, false);
+
+    // Count unique stale issues (only assigned ones)
+    const staleSet = new Set<string>();
+    for (const issue of issues) {
+      if (issue.isStale && issue.assignees && issue.assignees.length > 0) {
+        // Use assignee IDs to get unique issues
+        for (const assignee of issue.assignees) {
+          if (assignee && assignee.id && assignee.id !== '-1') {
+            staleSet.add(issue.zohoId);
+          }
+        }
+      }
+    }
+
+    res.json({ staleCount: staleSet.size });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('❌ Kanban stale count fetch failed:', msg);
     res.status(500).json({ error: msg });
   }
 });

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchIssues, type UserLoadStat } from '../api/client';
+import { fetchIssues, fetchIssuesKanban, type UserLoadStat } from '../api/client';
 import { roleColor } from './UserAvatar';
 
 function initials(name: string) {
@@ -27,20 +27,27 @@ interface UserStaleCardProps {
   staleDays?:    number | null;
   watchedStates?: string[];
   onUserClick?:  (userId: string, userName: string) => void;
+  isKanban?:     boolean;
 }
 
-type StaleUser = UserLoadStat & { doing: number; stale: number };
+type StaleUser = UserLoadStat & { todo: number; doing: number; done: number };
 
-function StaleRow({ user, rank, onUserClick }: {
+function StaleRow({ user, rank, onUserClick, isKanban, showTodo, showDoing, showDone }: {
   user:        StaleUser;
   rank:        number;
   onUserClick?: (userId: string, userName: string) => void;
+  isKanban: boolean;
+  showTodo: boolean;
+  showDoing: boolean;
+  showDone: boolean;
 }) {
-  const [hovered, setHovered] = useState(false);
   const todo  = user.todo  ?? 0;
   const doing = user.doing ?? 0;
   const done  = user.done  ?? 0;
-  const total = todo + doing + done;
+  
+  // Calculate total as ALL statuses (for the bar width)
+  const total = isKanban ? (todo + doing) : (todo + doing + done);
+  
   if (total === 0) return null;
 
   return (
@@ -53,13 +60,13 @@ function StaleRow({ user, rank, onUserClick }: {
         padding: '6px 8px',
         borderRadius: 6,
         cursor: 'pointer',
-        backgroundColor: hovered ? '#263148' : 'transparent',
+        backgroundColor: 'transparent',
         borderBottom: '1px solid #1e293b',
         margin: '0 -8px',
       }}
       onClick={() => onUserClick?.(String(user.id), user.name)}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#263148'}
+      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
     >
       {/* Rank */}
       <span style={{ fontSize: 11, color: '#475569', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
@@ -88,17 +95,17 @@ function StaleRow({ user, rank, onUserClick }: {
           {user.name}
         </span>
         <div style={{ height: 4, borderRadius: 2, backgroundColor: '#0f172a', overflow: 'hidden', display: 'flex' }}>
-          <div style={{ width: `${(todo  / total) * 100}%`, backgroundColor: '#64748b', transition: 'width 0.4s' }} />
-          <div style={{ width: `${(doing / total) * 100}%`, backgroundColor: '#3b82f6', transition: 'width 0.4s' }} />
-          <div style={{ width: `${(done  / total) * 100}%`, backgroundColor: '#22c55e', transition: 'width 0.4s' }} />
+          {showTodo && <div style={{ width: `${(todo  / total) * 100}%`, backgroundColor: '#64748b', transition: 'width 0.4s' }} />}
+          {showDoing && <div style={{ width: `${(doing / total) * 100}%`, backgroundColor: '#3b82f6', transition: 'width 0.4s' }} />}
+          {showDone && <div style={{ width: `${(done  / total) * 100}%`, backgroundColor: '#22c55e', transition: 'width 0.4s' }} />}
         </div>
       </div>
 
       {/* Status dots + total */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <StatusDot color="#64748b" count={todo}  label="todo"        />
-        <StatusDot color="#3b82f6" count={doing} label="in progress" />
-        <StatusDot color="#22c55e" count={done}  label="done"        />
+        {showTodo && <StatusDot color="#64748b" count={todo} label="todo"        />}
+        {showDoing && <StatusDot color="#3b82f6" count={doing} label="in progress" />}
+        {showDone && <StatusDot color="#22c55e" count={done}  label="done"        />}
         <span style={{
           fontSize: 11, fontWeight: 700, color: '#e2e8f0',
           marginLeft: 4, minWidth: 18, textAlign: 'right',
@@ -113,59 +120,151 @@ function StaleRow({ user, rank, onUserClick }: {
 
 export function UserStaleCard({
   projectId, sprintId, staleDays = 7,
-  watchedStates = [], onUserClick,
-}: UserStaleCardProps) {
+  watchedStates, onUserClick, isKanban,
+}: UserStaleCardProps & { isKanban?: boolean }) {
   const [users,            setUsers]            = useState<StaleUser[]>([]);
   const [totalStaleIssues, setTotalStaleIssues] = useState(0);
   const [loading,          setLoading]          = useState(true);
-  const [error,            setError]            = useState<string | null>(null);
 
-  const watchedStatesKey = watchedStates.join(',');
+  const watchedStatesArr = watchedStates ?? [];
+  const isKanbanVal = isKanban ?? false;
+
+  // Helper to check if a status should be counted based on watchedStates
+  // watchedStates are actual Zoho status names, not status groups
+  const isInWatchedStates = (status: string) => {
+    if (watchedStatesArr.length === 0) return true; // No filter = show all
+    return watchedStatesArr.includes(status);
+  };
 
   useEffect(() => {
     let mounted = true;
     setLoading(true);
-    setError(null);
 
     (async () => {
       try {
         const d = Number(staleDays) || 7;
-        // Do NOT pass watchedStates to the API — the backend compares them against
-        // actual Zoho status names but our watchedStates may be group names or
-        // actual names depending on the caller. Filter client-side on it.status instead.
-        const issuesRes = await fetchIssues(projectId, sprintId, { stale: true, staleDays: d });
-        if (!mounted) return;
-        const issues = issuesRes.issues || [];
-
-        const map = new Map<string, StaleUser>();
-
-        for (const it of issues) {
-          // watchedStates can be actual Zoho status names; skip issues not in the watched set
-          if (watchedStates.length && !watchedStates.includes(it.status)) continue;
-          const group = it.statusGroup || 'todo';
-
-          for (const a of (it.assignees || [])) {
-            const id = String(a.id);
-            if (!map.has(id)) {
-              map.set(id, { id, name: a.name || 'Unknown', role: a.role || 'OTHER', todo: 0, doing: 0, done: 0, stale: 0 });
+        
+        if (isKanbanVal) {
+          // For kanban boards, fetch raw issues and aggregate on frontend
+          const issuesRes = await fetchIssuesKanban(projectId, { stale: true, staleDays: d, watchedStates: watchedStatesArr });
+          if (!mounted) return;
+          
+          // Aggregate issues by user and statusGroup
+          const assigneeMap = new Map<string, {
+            id: string; name: string; role: string;
+            todo: number; doing: number; done: number; stale: number;
+          }>();
+          
+          let totalStaleCount = 0;
+          
+          for (const issue of issuesRes.issues) {
+            // Skip unassigned issues
+            if (!issue.assignees || issue.assignees.length === 0) continue;
+            
+            // Count stale issues
+            if (issue.isStale) totalStaleCount++;
+            
+            // Aggregate by assignee
+            for (const user of issue.assignees) {
+              if (!user || !user.id || user.id === '-1') continue;
+              
+              let entry = assigneeMap.get(user.id);
+              if (!entry) {
+                assigneeMap.set(user.id, { 
+                  id: user.id, 
+                  name: user.name, 
+                  role: user.role, 
+                  todo: 0, 
+                  doing: 0, 
+                  done: 0, 
+                  stale: 0 
+                });
+                entry = assigneeMap.get(user.id)!;
+              }
+              
+              // Only count issues in watched states
+              if (isInWatchedStates(issue.status)) {
+                if (issue.statusGroup === 'todo')  entry.todo++;
+                else if (issue.statusGroup === 'doing') entry.doing++;
+                else if (issue.statusGroup === 'done')  entry.done++;
+                
+                // Count stale for this assignee
+                if (issue.isStale) entry.stale++;
+              }
             }
-            const t = map.get(id)!;
-            if      (group === 'todo')  t.todo++;
-            else if (group === 'doing') t.doing++;
-            else                        t.done++;
-            t.stale++;
           }
+          
+          const usersArray = [...assigneeMap.values()];
+          // Sort by active load (todo + doing) descending
+          usersArray.sort((a, b) => {
+            const loadDiff = (b.todo + b.doing) - (a.todo + a.doing);
+            return loadDiff !== 0 ? loadDiff : 
+                   (b.todo + b.doing + b.done) - (a.todo + a.doing + a.done);
+          });
+          
+          setUsers(usersArray);
+          setTotalStaleIssues(totalStaleCount);
+        } else {
+          // For scrum boards, fetch raw issues and aggregate on frontend
+          const issuesRes = await fetchIssues(projectId, sprintId, { stale: true, staleDays: d, watchedStates: watchedStatesArr });
+          if (!mounted) return;
+          
+          // Aggregate issues by user and statusGroup
+          const assigneeMap = new Map<string, {
+            id: string; name: string; role: string;
+            todo: number; doing: number; done: number; stale: number;
+          }>();
+          
+          let totalStaleCount = 0;
+          
+          for (const issue of issuesRes.issues) {
+            // Skip unassigned issues
+            if (!issue.assignees || issue.assignees.length === 0) continue;
+            
+            // Count stale issues
+            if (issue.isStale) totalStaleCount++;
+            
+            // Aggregate by assignee
+            for (const user of issue.assignees) {
+              if (!user || !user.id || user.id === '-1') continue;
+              
+              let entry = assigneeMap.get(user.id);
+              if (!entry) {
+                assigneeMap.set(user.id, { 
+                  id: user.id, 
+                  name: user.name, 
+                  role: user.role, 
+                  todo: 0, 
+                  doing: 0, 
+                  done: 0, 
+                  stale: 0 
+                });
+                entry = assigneeMap.get(user.id)!;
+              }
+              
+              // Only count issues in watched states
+              if (isInWatchedStates(issue.status)) {
+                if (issue.statusGroup === 'todo')  entry.todo++;
+                else if (issue.statusGroup === 'doing') entry.doing++;
+                else if (issue.statusGroup === 'done')  entry.done++;
+                
+                // Count stale for this assignee
+                if (issue.isStale) entry.stale++;
+              }
+            }
+          }
+          
+          const usersArray = [...assigneeMap.values()];
+          // Sort by active load (todo + doing) descending
+          usersArray.sort((a, b) => {
+            const loadDiff = (b.todo + b.doing) - (a.todo + a.doing);
+            return loadDiff !== 0 ? loadDiff : 
+                   (b.todo + b.doing + b.done) - (a.todo + a.doing + a.done);
+          });
+          
+          setUsers(usersArray);
+          setTotalStaleIssues(totalStaleCount);
         }
-
-        const usersArr = [...map.values()].sort((a, b) => {
-          const diff = (b.todo + b.doing) - (a.todo + a.doing);
-          return diff !== 0 ? diff : a.name.localeCompare(b.name);
-        });
-        setUsers(usersArr);
-        setTotalStaleIssues(issues.length);
-      } catch (err: unknown) {
-        if (!mounted) return;
-        setError(err instanceof Error ? err.message : 'Failed to fetch user stats');
       } finally {
         if (mounted) setLoading(false);
       }
@@ -173,9 +272,22 @@ export function UserStaleCard({
 
     return () => { mounted = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, sprintId, staleDays, watchedStatesKey]);
+  }, [projectId, sprintId, staleDays, watchedStatesArr.join(','), isKanbanVal]);
 
-  const sorted = users.filter(u => (u.todo + u.doing + u.done) > 0);
+  // Determine which status groups to show based on watchedStates
+  // For kanban boards, only show 'doing' (active states)
+  // For scrum boards, show 'todo', 'doing', and optionally 'done'
+  const showTodo = !isKanbanVal && (watchedStatesArr.includes('todo') || watchedStatesArr.length === 0);
+  const showDoing = watchedStatesArr.includes('doing') || watchedStatesArr.length === 0;
+  const showDone = !isKanbanVal && (watchedStatesArr.includes('done') || watchedStatesArr.length === 0);
+
+  const sorted = users.filter(u => {
+    const todo  = u.todo  ?? 0;
+    const doing = u.doing ?? 0;
+    const done  = u.done  ?? 0;
+    const filterTotal = isKanbanVal ? (todo + doing) : (todo + doing + done);
+    return filterTotal > 0;
+  });
 
   return (
     <div style={s.card}>
@@ -192,62 +304,100 @@ export function UserStaleCard({
         )}
       </div>
 
-      {/* Column headers */}
-      {!loading && sorted.length > 0 && (
-        <div style={{
-          display: 'grid', gridTemplateColumns: '18px 28px 1fr auto',
-          gap: 10, padding: '0 8px',
-          fontSize: 10, color: '#475569', fontWeight: 600,
-          textTransform: 'uppercase', letterSpacing: '0.05em',
-        }}>
-          <span style={{ textAlign: 'right' }}>#</span>
-          <span />
-          <span>Assignee</span>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <span style={{ width: 18, textAlign: 'center' }}>◻</span>
-            <span style={{ width: 18, textAlign: 'center' }}>▶</span>
-            <span style={{ width: 18, textAlign: 'center' }}>✓</span>
-            <span style={{ width: 22, textAlign: 'right' }}>Tot</span>
+      {/* Table */}
+      {loading ? (
+        <div style={s.skeleton}>Loading...</div>
+      ) : sorted.length === 0 ? (
+        <div style={s.empty}>No stale issues found</div>
+      ) : (
+        <div style={s.table}>
+          <div style={s.tableRow}>
+            <span style={s.tableCell}>#</span>
+            <span style={s.tableCell}>Assignee</span>
+            {!isKanbanVal && <span style={s.tableCell}>Todo</span>}
+            <span style={s.tableCell}>In Progress</span>
+            {!isKanbanVal && <span style={s.tableCell}>Done</span>}
+            <span style={s.tableCell}>Total</span>
           </div>
+          {sorted.map((user, index) => (
+            <StaleRow
+              key={user.id}
+              user={user}
+              rank={index + 1}
+              onUserClick={onUserClick}
+              isKanban={isKanbanVal}
+              showTodo={showTodo}
+              showDoing={showDoing}
+              showDone={showDone}
+            />
+          ))}
         </div>
       )}
-
-      <div style={s.list}>
-        {loading && <p style={s.muted}>Loading…</p>}
-        {error   && <p style={s.muted}>Failed to load: {error}</p>}
-        {!loading && sorted.length === 0 && !error && (
-          <p style={s.muted}>No stale issues in watched states.</p>
-        )}
-        {!loading && sorted.map((user, idx) => (
-          <StaleRow key={user.id} user={user} rank={idx + 1} onUserClick={onUserClick} />
-        ))}
-      </div>
     </div>
   );
 }
 
 const s: Record<string, React.CSSProperties> = {
   card: {
-    gridColumn: 'span 2',
     backgroundColor: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: 12,
-    padding: '20px 22px',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  headerRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  label: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: '#e2e8f0',
+    margin: 0,
+  },
+  sub: {
+    fontSize: 11,
+    color: '#94a3b8',
+    margin: '2px 0 0 0',
+  },
+  staleBadge: {
+    backgroundColor: '#ef4444',
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 700,
+    padding: '2px 8px',
+    borderRadius: 4,
+  },
+  skeleton: {
+    color: '#475569',
+    fontSize: 12,
+  },
+  empty: {
+    color: '#64748b',
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+  table: {
     display: 'flex',
     flexDirection: 'column',
+    gap: 2,
+  },
+  tableRow: {
+    display: 'grid',
+    gridTemplateColumns: '18px 28px 1fr auto',
+    alignItems: 'center',
     gap: 10,
+    padding: '6px 8px',
+    borderBottom: '1px solid #334155',
+    color: '#64748b',
+    fontSize: 10,
+    fontWeight: 700,
+    textTransform: 'uppercase',
   },
-  headerRow: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' },
-  label: {
-    margin: 0, fontSize: 11, fontWeight: 600,
-    color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em',
+  tableCell: {
+    fontSize: 10,
+    fontWeight: 700,
+    color: '#64748b',
   },
-  sub:   { margin: '2px 0 0', fontSize: 11, color: '#475569' },
-  staleBadge: {
-    fontSize: 11, fontWeight: 700, padding: '3px 8px',
-    borderRadius: 20, border: '1px solid #f59e0b66',
-    backgroundColor: '#f59e0b11', color: '#f59e0b', flexShrink: 0,
-  },
-  list:  { display: 'flex', flexDirection: 'column' },
-  muted: { margin: 0, color: '#475569', fontSize: 13 },
 };

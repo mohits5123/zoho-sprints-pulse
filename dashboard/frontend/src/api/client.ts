@@ -364,6 +364,71 @@ export async function fetchIssues(
 }
 
 /**
+ * Fetch issues for a kanban board with optional filtering.
+ *
+ * @param projectId - The Zoho ID of the kanban project.
+ * @param opts - Optional filter parameters.
+ *
+ * @returns Array of issues matching the filters.
+ *
+ * @remarks
+ * Kanban boards don't have sprints - issues flow continuously through status groups.
+ * Available filters:
+ * - `status`: Filter by issue status (e.g., 'To Do', 'In Progress')
+ * - `statusGroup`: Filter by work bucket ('todo', 'doing', 'done')
+ * - `epicId`: Filter by epic ID
+ * - `userId`: Filter by assignee ID (uses JSON query on assigneeIds)
+ * - `creatorOnly`: If true, only return issues created by the user
+ * - `stale`: If true, only return stale issues
+ * - `staleDays`: Override the default stale threshold (default 7 days)
+ * - `watchedStates`: Comma-separated list of statuses to watch
+ *
+ * Issues are queried from the local SQLite database via issueQueries.ts.
+ */
+export async function fetchIssuesKanban(
+  projectId: string,
+  opts: { status?: string; statusGroup?: string; epicId?: string; userId?: string; creatorOnly?: boolean; stale?: boolean; staleDays?: number; watchedStates?: string[] } = {},
+): Promise<{ issues: IssueItem[] }> {
+  const params: Record<string, string | number> = {};
+  if (opts.status)         params.status        = opts.status;
+  if (opts.statusGroup)    params.statusGroup   = opts.statusGroup;
+  if (opts.epicId)         params.epicId        = opts.epicId;
+  if (opts.userId)         params.userId        = opts.userId;
+  if (opts.creatorOnly)    params.creatorOnly   = 'true';
+  if (opts.stale)          params.stale         = 'true';
+  if (opts.staleDays)      params.staleDays     = opts.staleDays;
+  if (opts.watchedStates?.length) params.watchedStates = opts.watchedStates.join(',');
+  const res = await apiClient.get<{ issues: IssueItem[] }>(`/projects/${projectId}/kanban/issues`, { params });
+  return res.data;
+}
+
+/**
+ * Fetch stale count for a kanban board.
+ *
+ * @param projectId - The Zoho ID of the kanban project.
+ * @param opts - Optional filter parameters.
+ *
+ * @returns Object with stale count.
+ *
+ * @remarks
+ * Kanban boards don't have sprints - issues flow continuously through status groups.
+ * This endpoint returns only the count of unique stale issues.
+ * Available filters:
+ * - `staleDays`: Override the default stale threshold (default 7 days)
+ * - `watchedStates`: Comma-separated list of statuses to watch
+ */
+export async function fetchKanbanStaleCount(
+  projectId: string,
+  opts: { staleDays?: number; watchedStates?: string[] } = {},
+): Promise<{ staleCount: number }> {
+  const params: Record<string, string | number> = {};
+  if (opts.staleDays)      params.staleDays     = opts.staleDays;
+  if (opts.watchedStates?.length) params.watchedStates = opts.watchedStates.join(',');
+  const res = await apiClient.get<{ staleCount: number }>(`/projects/${projectId}/kanban/stale-count`, { params });
+  return res.data;
+}
+
+/**
  * Fetch epics with their issue breakdown for a sprint.
  *
  * @param projectId - The Zoho ID of the project.

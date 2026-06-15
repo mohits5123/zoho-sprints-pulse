@@ -420,7 +420,14 @@ export async function queryIssues(
   const userMap = await buildUserMap();
   
   // Transform raw DB rows to enriched IssueItems with computed fields
-  const issues = dbIssues.map(i => toIssueItem(i, userMap, staleDays, watchedStates));
+  let issues = dbIssues.map(i => toIssueItem(i, userMap, staleDays, watchedStates));
+  
+  // Filter by watched states if configured (for staleness calculation and bar graph)
+  // If watchedStates is empty, show all issues (default behavior)
+  if (watchedStates.length > 0) {
+    const filtered = issues.filter(issue => watchedStates.includes(issue.status));
+    issues = filtered;
+  }
   
   // Apply any runtime filters (status, epic, user, stale)
   return applyFilters(issues, opts);
@@ -453,7 +460,14 @@ export async function queryKanbanIssues(
   const userMap = await buildUserMap();
   
   // Transform raw DB rows to enriched IssueItems with computed fields
-  const issues = dbIssues.map(i => toIssueItem(i, userMap, staleDays, watchedStates));
+  let issues = dbIssues.map(i => toIssueItem(i, userMap, staleDays, watchedStates));
+  
+  // Filter by watched states if configured (for staleness calculation and bar graph)
+  // If watchedStates is empty, show all issues (default behavior)
+  if (watchedStates.length > 0) {
+    const filtered = issues.filter(issue => watchedStates.includes(issue.status));
+    issues = filtered;
+  }
   
   // Apply optional user/creator filters
   if (userFilter || creatorOnly) {
@@ -544,8 +558,13 @@ export async function querySprintEpics(
   const epicNameMap = new Map(dbEpics.map(e => [e.zohoId, e.name]));
 
   // Group issues by epicId (or '__unassigned__' for unassigned issues)
+  // Only include issues in watched states (if configured)
   const epicIssueMap = new Map<string, typeof dbIssues>();
   for (const issue of dbIssues) {
+    // Filter by watched states if configured
+    const isInWatchedState = watchedStates.length === 0 || watchedStates.includes(issue.status);
+    if (!isInWatchedState) continue;
+    
     const key = issue.epicZohoId ?? '__unassigned__';
     if (!epicIssueMap.has(key)) epicIssueMap.set(key, []);
     epicIssueMap.get(key)!.push(issue);
@@ -794,6 +813,7 @@ export async function queryTeamLoad(staleDays: number = 7): Promise<{
 export async function queryUserIssues(
   userZohoId: string,
   staleDays:  number = 7,
+  watchedStates: string[] = [],
 ): Promise<ContextualIssue[]> {
   const activeSprints = await prisma.sprint.findMany({ where: { status: 'active' } });
   if (activeSprints.length === 0) return [];
@@ -840,10 +860,11 @@ export async function queryUserIssues(
   const userMap = await buildUserMap();
 
   // Transform raw rows and attach sprint/project context
-  return rawIssues.map(i => {
+  // Filter by watched states if configured
+  const issues = rawIssues.map(i => {
     const sprint  = sprintByZohoId.get(i.sprintZohoId);
     const project = projectByZohoId.get(i.projectZohoId);
-    const base = toIssueItem(i, userMap, staleDays, []);
+    const base = toIssueItem(i, userMap, staleDays, watchedStates);
     return {
       ...base,
       sprintId:    sprint?.id    ?? '',
@@ -852,6 +873,13 @@ export async function queryUserIssues(
       projectName: project?.name ?? i.projectZohoId,
     };
   });
+
+  // Filter by watched states if configured
+  if (watchedStates.length > 0) {
+    return issues.filter(issue => watchedStates.includes(issue.status));
+  }
+
+  return issues;
 }
 
 /**
