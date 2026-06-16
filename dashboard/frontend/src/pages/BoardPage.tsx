@@ -365,6 +365,7 @@ export function BoardPage() {
                     navigate(`/board/${projectId}/issues?${params}`);
                   }}
                   isKanban={project?.boardType === 'kanban'}
+                  style={{ gridColumn: 'span 2' }}
                 />
 
                 <TicketRaiserCard
