@@ -649,6 +649,26 @@ export async function fetchRaiserStats(
 }
 
 /**
+ * Fetch issue raiser statistics for kanban boards (no sprint scope).
+ *
+ * @param projectId - The project's primary DB id.
+ *
+ * @returns Array of users with their issue counts by status group (todo, doing, done).
+ *
+ * @remarks
+ * Shows which users raised the most issues across the entire kanban board.
+ * Does not count stale issues.
+ */
+export async function fetchKanbanRaiserStats(
+  projectId: string,
+): Promise<RaiserStat[]> {
+  const res = await apiClient.get<{ raisers: RaiserStat[] }>(
+    `/projects/${projectId}/kanban-raiser-stats`,
+  );
+  return res.data.raisers;
+}
+
+/**
  * Fetch team-wide workload statistics across all projects and sprints.
  *
  * @param staleDays - Threshold for counting stale issues (default 7 days).

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { fetchRaiserStats, type RaiserStat } from '../api/client';
+import { fetchRaiserStats, fetchKanbanRaiserStats, type RaiserStat } from '../api/client';
 import { roleColor } from './UserAvatar';
 
 /** Generate initials from name */
@@ -114,25 +114,30 @@ function RaiserRow({ raiser, rank, onClick }: RaiserRowProps) {
 interface TicketRaiserCardProps {
   /** Project ID */
   projectId: string;
-  /** Sprint ID */
+  /** Sprint ID (ignored for kanban boards) */
   sprintId: string;
+  /** Board type to determine which API to call */
+  boardType: 'scrum' | 'kanban';
   /** Callback when a user is clicked */
   onUserClick: (userId: string, userName: string) => void;
 }
 
 /** TicketRaiserCard displays contributor statistics showing who raised the most tickets */
-export function TicketRaiserCard({ projectId, sprintId, onUserClick }: TicketRaiserCardProps) {
+export function TicketRaiserCard({ projectId, sprintId, boardType, onUserClick }: TicketRaiserCardProps) {
   const [raisers, setRaisers] = useState<RaiserStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
-    fetchRaiserStats(projectId, sprintId)
+    const promise = boardType === 'kanban'
+      ? fetchKanbanRaiserStats(projectId)
+      : fetchRaiserStats(projectId, sprintId);
+    promise
       .then(setRaisers)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [projectId, sprintId]);
+  }, [projectId, sprintId, boardType]);
 
   const totalRaised = raisers.reduce((s, r) => s + r.todo + r.doing + r.done, 0);
   const totalDone   = raisers.reduce((s, r) => s + r.done, 0);

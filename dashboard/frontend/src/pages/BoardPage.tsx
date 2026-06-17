@@ -381,6 +381,7 @@ export function BoardPage() {
                 <TicketRaiserCard
                   projectId={projectId!}
                   sprintId={project?.boardType === 'kanban' ? '' : selectedSprint.id}
+                  boardType={project?.boardType === 'kanban' ? 'kanban' as const : 'scrum' as const}
                   onUserClick={(userId, userName) => {
                     const params = baseIssueParams({
                       userId,

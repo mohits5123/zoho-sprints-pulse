@@ -402,6 +402,62 @@ router.get('/:id/sprints/:sprintId/raiser-stats', async (req, res) => {
 });
 
 /**
+ * GET /api/projects/:id/kanban-raiser-stats — Per-creator ticket counts for kanban boards.
+ * @route GET /api/projects/:id/kanban-raiser-stats
+ * @method GET
+ * @param {string} id - Project's primary DB id (not zohoId)
+ * @returns {Object} - Per-creator ticket counts across all statuses
+ *   { raisers: Array<{ id, name, role, todo, doing, done }> } - Sorted by total tickets raised (descending)
+ * @notes
+ *   - Kanban boards have no sprints - aggregates across all issues in the board
+ *   - Aggregates per creator (ticket raiser), NOT assignees
+ *   - Only counts issues within this project (no sprint scope)
+ * @auth Required (OAuth token validation)
+ */
+router.get('/:id/kanban-raiser-stats', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
+
+    const issues = await queryKanbanIssues(project.zohoId);
+
+    // Aggregate per creator (ticket raiser)
+    const map = new Map<string, {
+      id: string; name: string; role: string;
+      todo: number; doing: number; done: number;
+    }>();
+
+    for (const issue of issues) {
+      const c = issue.creator;
+      if (!c) continue;  // Skip issues without creator data
+
+      let entry = map.get(c.id);
+      if (!entry) {
+        map.set(c.id, { id: c.id, name: c.name, role: c.role, todo: 0, doing: 0, done: 0 });
+        entry = map.get(c.id)!;
+      }
+
+      if      (issue.statusGroup === 'todo')  entry.todo++;
+      else if (issue.statusGroup === 'doing') entry.doing++;
+      else if (issue.statusGroup === 'done')  entry.done++;
+    }
+
+    // Sort by total tickets raised (todo + doing + done), descending
+    const raisers = [...map.values()].sort(
+      (a, b) => (b.todo + b.doing + b.done) - (a.todo + a.doing + b.done),
+    );
+
+    res.json({ raisers });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('❌ Kanban raiser stats fetch failed:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
  * GET /api/projects/:id/sprints/:sprintId/user-stats — Per-user (assignee) workload stats for a sprint.
  * @route GET /api/projects/:id/sprints/:sprintId/user-stats?staleDays=N (optional)
  * @method GET
