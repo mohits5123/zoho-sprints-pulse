@@ -36,6 +36,7 @@ interface UserStaleCardProps {
   staleDays?:    number | null;             // Number of days to consider an issue stale (default: 7)
   watchedStates?: string[];                 // Optional filter for specific Zoho status names
   onUserClick?:  (userId: string, userName: string) => void; // Callback when user row is clicked
+  onStaleClick?: () => void;                // Callback when stale badge is clicked
   isKanban?:     boolean;                   // True for Kanban boards, false for Scrum boards
   style?:        React.CSSProperties;       // Optional inline style overrides
 }
@@ -163,7 +164,7 @@ function StaleRow({ user, rank, onUserClick, isKanban, showTodo, showDoing, show
  */
 export function UserStaleCard({
   projectId, sprintId, staleDays = 7,
-  watchedStates, onUserClick, isKanban, style,
+  watchedStates, onUserClick, onStaleClick, isKanban, style,
 }: UserStaleCardProps & { isKanban?: boolean }) {
   const [users,            setUsers]            = useState<StaleUser[]>([]);
   const [totalStaleIssues, setTotalStaleIssues] = useState(0);
@@ -404,7 +405,13 @@ export function UserStaleCard({
           )}
         </div>
         {!loading && totalStaleIssues > 0 && (
-          <span style={s.staleBadge}>⚠ {totalStaleIssues} stale</span>
+          <span
+            style={{ ...s.staleBadge, cursor: onStaleClick ? 'pointer' : 'default' }}
+            onClick={onStaleClick}
+            title={`${totalStaleIssues} stale ticket${totalStaleIssues !== 1 ? 's' : ''} across all users`}
+          >
+            ⚠ {totalStaleIssues} stale
+          </span>
         )}
       </div>
 
@@ -454,33 +461,21 @@ const s: Record<string, React.CSSProperties> = {
     padding: '20px 22px',
   },
   /** Header row: title and stats aligned horizontally */
-  headerRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
+  headerRow: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
   /** Title text style */
   label: {
-    fontSize: 13,
-    fontWeight: 700,
-    color: '#e2e8f0',
-    margin: 0,
+    margin: 0, fontSize: 11, fontWeight: 600,
+    color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em',
   },
   /** Subtitle showing assignee count and ticket count */
   sub: {
-    fontSize: 11,
-    color: '#94a3b8',
-    margin: '2px 0 0 0',
+    margin: '2px 0 0', fontSize: 11, color: '#475569',
   },
-  /** Warning badge with red background for stale count */
+  /** Warning badge (yellow) for stale count */
   staleBadge: {
-    backgroundColor: '#ef4444',
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: 700,
-    padding: '2px 8px',
-    borderRadius: 4,
+    fontSize: 11, fontWeight: 700, padding: '3px 8px',
+    borderRadius: 20, border: '1px solid #f59e0b66',
+    backgroundColor: '#f59e0b11', color: '#f59e0b',
   },
   /** Loading skeleton text style */
   skeleton: {

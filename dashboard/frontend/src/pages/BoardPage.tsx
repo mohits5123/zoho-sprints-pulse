@@ -364,6 +364,16 @@ export function BoardPage() {
                     });
                     navigate(`/board/${projectId}/issues?${params}`);
                   }}
+                  onStaleClick={() => {
+                    const params = baseIssueParams({
+                      stale:      'true',
+                      staleDays:  String(staleDays),
+                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                      sprintName: selectedSprint.name,
+                    });
+                    if (watchedStates.length) params.set('watchedStates', watchedStates.join(','));
+                    navigate(`/board/${projectId}/issues?${params}`);
+                  }}
                   isKanban={project?.boardType === 'kanban'}
                   style={{ gridColumn: 'span 2' }}
                 />
