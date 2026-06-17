@@ -425,10 +425,8 @@ export function UserStaleCard({
           <div style={s.tableRow}>
             <span style={s.tableCell}>#</span>
             <span style={s.tableCell}>Assignee</span>
-            {!isKanbanVal && <span style={s.tableCell}>Todo</span>}
-            <span style={s.tableCell}>In Progress</span>
-            {!isKanbanVal && <span style={s.tableCell}>Done</span>}
-            <span style={s.tableCell}>Total</span>
+            <span style={{ visibility: 'hidden' }}>&nbsp;</span>
+            <span style={s.tableCell}>Tickets</span>
           </div>
           {sorted.map((user, index) => (
             <StaleRow

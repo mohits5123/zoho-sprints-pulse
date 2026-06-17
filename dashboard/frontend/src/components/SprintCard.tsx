@@ -215,7 +215,7 @@ const s: Record<string, React.CSSProperties> = {
   /** Badges and status pill aligned to the right with wrap enabled */
   headerRight:  { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'wrap' as const, justifyContent: 'flex-end' },
   /** Sprint name title with full width */
-  sprintName: { margin: 0, fontSize: 15, fontWeight: 700, color: '#f1f5f9', lineHeight: 1.3, flex: 1 },
+  sprintName: { margin: 0, fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', flex: 1 },
   /** Stale warning badge (yellow) for tickets pending action */
   staleBadge: {
     fontSize: 11, fontWeight: 700, padding: '3px 8px',
