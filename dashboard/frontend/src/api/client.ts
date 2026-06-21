@@ -79,7 +79,6 @@ export type UserRole = 'DEV' | 'QA' | 'PROD' | 'OTHER';
  * This is a locally-mutable field not sourced from Zoho.
  */
 export interface User {
-  id: string;
   zohoId: string;
   name: string;
   email: string | null;
@@ -130,7 +129,6 @@ export async function syncUsers(): Promise<{ synced: number; users: User[] }> {
  * The `activeSprints` field contains snapshots of currently active sprints for this project.
  */
 export interface Project {
-  id: string;
   zohoId: string;
   name: string;
   prefix: string | null;
@@ -266,7 +264,6 @@ export async function updateUserRole(id: string, role: UserRole): Promise<User> 
  * The `rawData` field contains the complete status groups structure.
  */
 export interface SprintSnapshot {
-  id: string;
   zohoId: string;
   projectZohoId: string;
   projectName: string;
@@ -799,5 +796,53 @@ export interface SprintHistoryItem {
  */
 export async function fetchUserSprintHistory(userId: string, limit: number = 12): Promise<{ history: SprintHistoryItem[]; total: number }> {
   const res = await apiClient.get<{ history: SprintHistoryItem[]; total: number }>(`/users/${userId}/sprint-history`, { params: { limit } });
+  return res.data;
+}
+
+/**
+ * Backlog statistics response from the backend.
+ */
+export interface BacklogStats {
+  summary: {
+    total: number;
+    staleCount: number;
+    statusGroups: {
+      todo: number;
+      doing: number;
+      done: number;
+    };
+  };
+  oldestItems: IssueItem[];
+  assignees: Array<{
+    id: string;
+    name: string;
+    role: string;
+    count: number;
+  }>;
+}
+
+/**
+ * Fetch backlog statistics for a project.
+ *
+ * @param projectId - The project's primary DB id.
+ * @param staleDays - Threshold for counting stale issues (default 7 days).
+ * @param watchedStates - Comma-separated list of statuses to watch for staleness.
+ *
+ * @returns Backlog statistics including summary, oldest items, and assignee distribution.
+ *
+ * @remarks
+ * Used for the BacklogPage to display backlog overview.
+ * Scrum: non-active sprint issues. Kanban: todo status group only.
+ */
+export async function fetchBacklogStats(
+  projectId: string,
+  staleDays: number = 7,
+  watchedStates: string[] = [],
+): Promise<BacklogStats> {
+  const params: Record<string, string | number | undefined> = { staleDays };
+  if (watchedStates.length > 0) {
+    params.watchedStates = watchedStates.join(',');
+  }
+  const res = await apiClient.get<BacklogStats>(`/projects/${projectId}/backlog-stats`, { params });
   return res.data;
 }

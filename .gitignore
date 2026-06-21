@@ -14,6 +14,7 @@ dashboard/frontend/dist/
 # Database
 prisma/dev.db
 *.db
+*.sql
 
 # IDE
 .idea/

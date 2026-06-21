@@ -100,7 +100,7 @@ export function SprintHealth() {
 
       {!loading && sprints.length > 0 && (
         <div style={s.grid}>
-          {sprints.map((sp) => <SprintCard key={sp.id} sprint={sp} />)}
+          {sprints.map((sp) => <SprintCard key={sp.zohoId} sprint={sp} />)}
         </div>
       )}
       <LastSyncedFooter lastSyncedAt={lastSyncedAt} />

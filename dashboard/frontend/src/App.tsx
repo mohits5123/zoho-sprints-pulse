@@ -20,6 +20,7 @@ import { SprintHealth } from './pages/SprintHealth';
 import { BoardPage } from './pages/BoardPage';
 import { IssueListPage } from './pages/IssueListPage';
 import { UserProfilePage } from './pages/UserProfilePage';
+import { BacklogPage } from './pages/BacklogPage';
 
 /**
  * Root application component that renders the navigation structure.
@@ -38,6 +39,7 @@ export default function App() {
         <Route path="/sprints" element={<SprintHealth />} />
         <Route path="/board/:projectId" element={<BoardPage />} />
         <Route path="/board/:projectId/issues" element={<IssueListPage />} />
+        <Route path="/backlog/:projectId" element={<BacklogPage />} />
       </Routes>
     </BrowserRouter>
   );

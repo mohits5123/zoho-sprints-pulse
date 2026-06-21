@@ -42,11 +42,11 @@ router.get('/', async (_req, res) => {
  * GET /api/users/:id/profile — Cross-sprint issue summary for one developer.
  * @route GET /api/users/:id/profile?staleDays=N (optional)
  * @method GET
- * @param {string} id - User's primary DB id (not zohoId)
+ * @param {string} id - User's zohoId (primary key)
  * @query staleDays (optional, default: 7, min: 1) - Days since last update to consider issue stale
  * @returns {Object} - User profile with issue metrics across all active sprints
  *   {
- *     user: { id, zohoId, name, email, role },
+ *     user: { zohoId, name, email, role },
  *     issues: Array<Issue> - All issues created by this user (across all active sprints)
  *     raisedIssues: Issue[] - Filtered issues where this user is the creator
  *     summary: { total, todo, doing, done, stale, overdue, collab, raised } - Aggregate counts
@@ -63,7 +63,7 @@ router.get('/:id/profile', async (req, res) => {
   try {
     const staleDays = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
     const watchedStates = req.query.watchedStates ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean) : [];
-    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    const user = await prisma.user.findUnique({ where: { zohoId: req.params.id } });
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
     const activeSprints = await prisma.sprint.findMany({ where: { status: 'active' } });
@@ -80,7 +80,7 @@ router.get('/:id/profile', async (req, res) => {
     const collab  = allIssues.filter((i) => i.assignees.length > 1).length;
 
     res.json({
-      user: { id: user.id, zohoId: user.zohoId, name: user.name, email: user.email, role: user.role },
+      user: { zohoId: user.zohoId, name: user.name, email: user.email, role: user.role },
       issues:       allIssues,
       raisedIssues,
       summary:      { total: allIssues.length, todo, doing, done, stale, overdue, collab, raised: raisedIssues.length },
@@ -98,7 +98,7 @@ router.get('/:id/profile', async (req, res) => {
  * GET /api/users/:id/sprint-history — Per-sprint contributor stats for one developer.
  * @route GET /api/users/:id/sprint-history?limit=N (optional, default: 12)
  * @method GET
- * @param {string} id - User's primary DB id (not zohoId)
+ * @param {string} id - User's zohoId (primary key)
  * @query limit (optional, default: 12, range: 1-20) - Maximum sprint history entries to return
  * @returns {Object} - Per-sprint issue counts for this developer
  *   {
@@ -113,7 +113,7 @@ router.get('/:id/profile', async (req, res) => {
 router.get('/:id/sprint-history', async (req, res) => {
   try {
     const limit = Math.min(20, Math.max(1, parseInt(String(req.query.limit ?? '12'), 10) || 12));
-    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    const user = await prisma.user.findUnique({ where: { zohoId: req.params.id } });
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
     // Single DB query — no Zoho calls
@@ -176,7 +176,7 @@ router.post('/sync', async (_req, res) => {
  * PATCH /api/users/:id/role — Update the local role label for a user.
  * @route PATCH /api/users/:id/role
  * @method PATCH
- * @params {string} id - User's primary DB id (not zohoId)
+ * @params {string} id - User's zohoId (primary key)
  * @body {Object} body: { role: 'DEV' | 'QA' | 'PROD' | 'OTHER' }
  * @returns {Object} - Updated user object with new role. Response format: { user: User } where User contains { id: string, zohoId: string, name: string, email: string, role: Role }
  *   { user: User }
@@ -198,7 +198,7 @@ router.patch('/:id/role', async (req, res) => {
       return;
     }
     
-    const user = await prisma.user.update({ where: { id }, data: { role } });
+    const user = await prisma.user.update({ where: { zohoId: id }, data: { role } });
     res.json({ user });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';

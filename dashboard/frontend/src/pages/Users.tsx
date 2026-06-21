@@ -124,7 +124,7 @@ export function Users() {
    * @param newRole - The new role to assign
    */
   function handleRoleChange(id: string, newRole: UserRole) {
-    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, role: newRole } : u)));
+    setUsers((prev) => prev.map((u) => (u.zohoId === id ? { ...u, role: newRole } : u)));
   }
 
   return (
@@ -200,12 +200,12 @@ export function Users() {
               const stat = loadMap.get(user.zohoId);
               return (
                 <UserCard
-                  key={user.id}
+                  key={user.zohoId}
                   user={user}
                   wip={stat ? stat.todo + stat.doing : 0}
                   staleCount={stat?.stale ?? 0}
                   onRoleChange={handleRoleChange}
-                  onClick={() => navigate(`/users/${user.id}`)}
+                  onClick={() => navigate(`/users/${user.zohoId}`)}
                 />
               );
             })}

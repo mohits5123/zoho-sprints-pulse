@@ -53,7 +53,6 @@ function buildKanbanSprint(project: Project): SprintSnapshot {
   const groups    = project.statusGroups    ? JSON.parse(project.statusGroups)    as Record<string, string>  : {};
   const total     = Object.values(breakdown).reduce((s, n) => s + n, 0);
   return {
-    id:              project.id,
     zohoId:          'kanban-board',
     projectZohoId:   project.zohoId,
     projectName:     project.name,
@@ -106,7 +105,7 @@ export function BoardPage() {
         setStaleConfig(loadStaleConfig(projectId, {}));
         // If a sprintId was passed via query param, use it directly
         if (sprintIdParam) {
-          const match = p.activeSprints.find((s) => s.id === sprintIdParam);
+          const match = p.activeSprints.find((s) => s.zohoId === sprintIdParam);
           if (match) { setSelectedSprint(match); return; }
         }
         // Auto-select if there's exactly one sprint (or it's kanban)
@@ -145,11 +144,11 @@ export function BoardPage() {
       return;
     }
     setEpicsLoading(true);
-    fetchSprintEpics(projectId, selectedSprint.id, staleDays, watchedStates)
+    fetchSprintEpics(projectId, selectedSprint.zohoId, staleDays, watchedStates)
       .then(({ epics: e, statusGroups: sg }) => { setEpics(e); setSprintStatusGroups(sg); })
       .catch((err) => console.error('Epic fetch failed:', err.message))
       .finally(() => setEpicsLoading(false));
-  }, [selectedSprint?.id, projectId, project?.boardType, staleDays, watchedStates.join(',')]);
+  }, [selectedSprint?.zohoId, projectId, project?.boardType, staleDays, watchedStates.join(',')]);
 
   // Base params shared across all issue navigation calls
   function baseIssueParams(extra: Record<string, string>) {
@@ -178,14 +177,15 @@ export function BoardPage() {
         </div>
 
         <div style={s.headerRight}>
-          {/* Stale settings button */}
-          <button style={s.staleBtn} onClick={() => setShowStaleModal(true)} title="Configure stale ticket settings">
-            ⏱ Stale: {staleDays}d
-            {watchedStates.length > 0 && (
-              <span style={s.staleBtnBadge}> · {watchedStates.length} state{watchedStates.length !== 1 ? 's' : ''}</span>
-            )}
-            <span style={s.staleBtnIcon}>⚙</span>
-          </button>
+           {/* Stale settings button */}
+           <button style={s.staleBtn} onClick={() => setShowStaleModal(true)} title="Configure stale ticket settings">
+             ⏱ Stale: {staleDays}d
+             {watchedStates.length > 0 && (
+               <span style={s.staleBtnBadge}> · {watchedStates.length} state{watchedStates.length !== 1 ? 's' : ''}</span>
+             )}
+             <span style={s.staleBtnIcon}>⚙</span>
+           </button>
+
 
           {selectedSprint && project?.boardType !== 'kanban' && project?.activeSprints && project.activeSprints.length > 1 && (
             <button style={s.switchBtn} onClick={() => { setSelectedSprint(null); setEpics([]); }}>
@@ -216,7 +216,7 @@ export function BoardPage() {
           <div style={s.grid}>
             {project.activeSprints.map((sp) => (
               <button
-                key={sp.id}
+                key={sp.zohoId}
                 style={s.pickerCardBtn}
                 onClick={() => setSelectedSprint(sp)}
               >
@@ -245,7 +245,7 @@ export function BoardPage() {
                       const params = baseIssueParams({
                         stale:      'true',
                         staleDays:  String(staleDays),
-                        sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                        sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.zohoId,
                         sprintName: selectedSprint.name,
                       });
                       if (watchedStates.length) params.set('watchedStates', watchedStates.join(','));
@@ -265,7 +265,7 @@ export function BoardPage() {
                       const params = baseIssueParams({
                         userId,
                         userName,
-                        sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                        sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.zohoId,
                         sprintName: selectedSprint.name,
                       });
                       navigate(`/board/${projectId}/issues?${params}`);
@@ -273,7 +273,7 @@ export function BoardPage() {
                     onStatusClick={(status) => {
                       const params = baseIssueParams({
                         status,
-                        sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                        sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.zohoId,
                         sprintName: selectedSprint.name,
                       });
                       navigate(`/board/${projectId}/issues?${params}`);
@@ -288,7 +288,7 @@ export function BoardPage() {
                       onGroupClick={(group) => {
                         const params = baseIssueParams({
                       statusGroup: group,
-                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.zohoId,
                     });
                     navigate(`/board/${projectId}/issues?${params}`);
                   }}
@@ -317,13 +317,13 @@ export function BoardPage() {
 
                 <UserLoadCard
                   projectId={projectId!}
-                  sprintId={project?.boardType === 'kanban' ? '' : selectedSprint.id}
+                  sprintId={project?.boardType === 'kanban' ? '' : selectedSprint.zohoId}
                   staleDays={staleDays}
                   onUserClick={(userId, userName) => {
                     const params = baseIssueParams({
                       userId,
                       userName,
-                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.zohoId,
                       sprintName: selectedSprint.name,
                     });
                     navigate(`/board/${projectId}/issues?${params}`);
@@ -334,13 +334,13 @@ export function BoardPage() {
                 {project?.boardType !== 'kanban' && (
                   <UserCompletionCard
                     projectId={projectId!}
-                    sprintId={project?.boardType === 'kanban' ? '' : selectedSprint.id}
+                    sprintId={project?.boardType === 'kanban' ? '' : selectedSprint.zohoId}
                     staleDays={staleDays}
                     onUserClick={(userId, userName) => {
                       const params = baseIssueParams({
                         userId,
                         userName,
-                        sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                        sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.zohoId,
                         sprintName: selectedSprint.name,
                       });
                       navigate(`/board/${projectId}/issues?${params}`);
@@ -350,7 +350,7 @@ export function BoardPage() {
 
                 <UserStaleCard
                   projectId={projectId!}
-                  sprintId={project?.boardType === 'kanban' ? '' : selectedSprint.id}
+                  sprintId={project?.boardType === 'kanban' ? '' : selectedSprint.zohoId}
                   staleDays={staleDays}
                   watchedStates={watchedStates}
                   onUserClick={(userId, userName) => {
@@ -359,7 +359,7 @@ export function BoardPage() {
                       userName,
                       stale:      'true',
                       staleDays:  String(staleDays),
-                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.zohoId,
                       sprintName: selectedSprint.name,
                     });
                     navigate(`/board/${projectId}/issues?${params}`);
@@ -368,7 +368,7 @@ export function BoardPage() {
                     const params = baseIssueParams({
                       stale:      'true',
                       staleDays:  String(staleDays),
-                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.zohoId,
                       sprintName: selectedSprint.name,
                     });
                     if (watchedStates.length) params.set('watchedStates', watchedStates.join(','));
@@ -380,13 +380,13 @@ export function BoardPage() {
 
                 <TicketRaiserCard
                   projectId={projectId!}
-                  sprintId={project?.boardType === 'kanban' ? '' : selectedSprint.id}
+                  sprintId={project?.boardType === 'kanban' ? '' : selectedSprint.zohoId}
                   boardType={project?.boardType === 'kanban' ? 'kanban' as const : 'scrum' as const}
                   onUserClick={(userId, userName) => {
                     const params = baseIssueParams({
                       userId,
                       userName,
-                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.id,
+                      sprintId:   project?.boardType === 'kanban' ? '' : selectedSprint.zohoId,
                       sprintName: selectedSprint.name,
                       creatorOnly: 'true',
                     });
@@ -429,7 +429,7 @@ export function BoardPage() {
                       staleDays={staleDays}
                       onStatusClick={(status) => {
                         const params = baseIssueParams({
-                          sprintId:   selectedSprint.id,
+                          sprintId:   selectedSprint.zohoId,
                           epicId:     epic.id,
                           status,
                           sprintName: selectedSprint.name,
@@ -439,7 +439,7 @@ export function BoardPage() {
                       }}
                       onStaleClick={() => {
                         const params = baseIssueParams({
-                          sprintId:   selectedSprint.id,
+                          sprintId:   selectedSprint.zohoId,
                           epicId:     epic.id,
                           stale:      'true',
                           staleDays:  String(staleDays),
@@ -451,7 +451,7 @@ export function BoardPage() {
                       }}
                       onUserClick={(userId, userName) => {
                         const params = baseIssueParams({
-                          sprintId:   selectedSprint.id,
+                          sprintId:   selectedSprint.zohoId,
                           epicId:     epic.id,
                           userId,
                           userName,
@@ -516,6 +516,11 @@ const s: Record<string, React.CSSProperties> = {
   switchBtn: {
     padding: '8px 16px', backgroundColor: 'transparent', color: '#94a3b8',
     border: '1px solid #334155', borderRadius: 8, fontSize: 13, cursor: 'pointer',
+  },
+  backlogBtn: {
+    padding: '8px 16px', backgroundColor: '#1e293b', color: '#e2e8f0',
+    border: '1px solid #334155', borderRadius: 8, fontSize: 13, fontWeight: 600,
+    cursor: 'pointer', userSelect: 'none' as const,
   },
   grid: {
     display: 'grid',

@@ -80,8 +80,8 @@ export function UserCard({ user, wip = 0, staleCount = 0, onRoleChange, onClick 
     setRole(newRole);
     setUpdating(true);
     try {
-      await updateUserRole(user.id, newRole);
-      onRoleChange?.(user.id, newRole);
+      await updateUserRole(user.zohoId, newRole);
+      onRoleChange?.(user.zohoId, newRole);
     } catch {
       // Revert to previous role on failure
       setRole(prev);

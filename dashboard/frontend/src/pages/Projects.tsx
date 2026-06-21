@@ -124,8 +124,8 @@ function ProjectCard({
     setBoardType(val);
     setSaving(true);
     try {
-      await updateProjectBoardType(project.id, val);
-      onBoardTypeChange(project.id, val);
+      await updateProjectBoardType(project.zohoId, val);
+      onBoardTypeChange(project.zohoId, val);
     } catch {
       setBoardType(prev);
     } finally {
@@ -189,7 +189,7 @@ function ProjectCard({
               <div style={s.dropdown}>
                 <button
                   style={s.dropdownItem}
-                  onClick={() => { setMenuOpen(false); onHide(project.id); }}
+                  onClick={() => { setMenuOpen(false); onHide(project.zohoId); }}
                 >
                   🙈 Hide pod
                 </button>
@@ -228,7 +228,7 @@ function ProjectCard({
                   ...s.sprintRowClickable,
                   ...(hoveredRow === 'kanban-board' ? s.sprintRowHover : {}),
                 }}
-                onClick={() => onNavigate(project.id)}
+                onClick={() => onNavigate(project.zohoId)}
                 onMouseEnter={() => setHoveredRow('kanban-board')}
                 onMouseLeave={() => setHoveredRow(null)}
               >
@@ -258,10 +258,10 @@ function ProjectCard({
                     style={{
                       ...s.sprintRow,
                       ...s.sprintRowClickable,
-                      ...(hoveredRow === sp.id ? s.sprintRowHover : {}),
+                      ...(hoveredRow === sp.zohoId ? s.sprintRowHover : {}),
                     }}
-                    onClick={() => onNavigate(project.id, sp.id)}
-                    onMouseEnter={() => setHoveredRow(sp.id)}
+                    onClick={() => onNavigate(project.zohoId, sp.zohoId)}
+                    onMouseEnter={() => setHoveredRow(sp.zohoId)}
                     onMouseLeave={() => setHoveredRow(null)}
                     title={`Open ${sp.name}`}
                   >
@@ -285,19 +285,21 @@ function ProjectCard({
 
       {/* Backlog — border separator above, inner row is hoverable */}
       <div style={s.backlogSeparator}>
-        <div
-          style={{
-            ...s.backlogRow,
-            ...(hoveredRow === 'backlog' ? s.sprintRowHover : {}),
-          }}
-          onMouseEnter={() => setHoveredRow('backlog')}
-          onMouseLeave={() => setHoveredRow(null)}
-        >
-          <span style={s.backlogLabel}>Backlog</span>
-          <span style={s.backlogValue}>
-            {project.backlogCount !== null && project.backlogCount !== undefined ? project.backlogCount : '—'}
-          </span>
-        </div>
+         <div
+           style={{
+             ...s.backlogRow,
+             ...(hoveredRow === 'backlog' ? s.sprintRowHover : {}),
+           }}
+           onMouseEnter={() => setHoveredRow('backlog')}
+           onMouseLeave={() => setHoveredRow(null)}
+           onClick={() => onNavigate(project.zohoId, 'backlog')}
+         >
+           <span style={s.backlogLabel}>Backlog</span>
+           <span style={s.backlogValue}>
+             {project.backlogCount !== null && project.backlogCount !== undefined ? project.backlogCount : '—'}
+           </span>
+         </div>
+
       </div>
     </div>
   );
@@ -339,16 +341,16 @@ export function Projects() {
   }
 
   async function handleHide(id: string) {
-    setProjects((prev) => prev.map((p) => p.id === id ? { ...p, hidden: true } : p));
+    setProjects((prev) => prev.map((p) => p.zohoId === id ? { ...p, hidden: true } : p));
     await updateProjectDisplay(id, { hidden: true }).catch(() => {
-      setProjects((prev) => prev.map((p) => p.id === id ? { ...p, hidden: false } : p));
+      setProjects((prev) => prev.map((p) => p.zohoId === id ? { ...p, hidden: false } : p));
     });
   }
 
   async function handleUnhide(id: string) {
-    setProjects((prev) => prev.map((p) => p.id === id ? { ...p, hidden: false } : p));
+    setProjects((prev) => prev.map((p) => p.zohoId === id ? { ...p, hidden: false } : p));
     await updateProjectDisplay(id, { hidden: false }).catch(() => {
-      setProjects((prev) => prev.map((p) => p.id === id ? { ...p, hidden: true } : p));
+      setProjects((prev) => prev.map((p) => p.zohoId === id ? { ...p, hidden: true } : p));
     });
   }
 
@@ -375,7 +377,7 @@ export function Projects() {
       reordered.splice(dropIndex, 0, moved);
       const updated = reordered.map((p, i) => ({ ...p, displayOrder: i }));
       // Persist to backend (fire-and-forget)
-      reorderProjects(updated.map((p) => p.id));
+      reorderProjects(updated.map((p) => p.zohoId));
       return [...updated, ...hidden];
     });
 
@@ -415,16 +417,23 @@ export function Projects() {
       {!loading && visible.length > 0 && (
         <div style={s.grid}>
           {visible.map((p, i) => (
-            <ProjectCard
-              key={p.id}
-              project={p}
-              isDragging={dragIndex.current === i}
-              isDropTarget={dropTarget === i}
-              onBoardTypeChange={(id, bt) =>
-                setProjects((prev) => prev.map((x) => x.id === id ? { ...x, boardType: bt } : x))
-              }
+          <ProjectCard
+               key={p.zohoId}
+               project={p}
+               isDragging={dragIndex.current === i}
+               isDropTarget={dropTarget === i}
+               onBoardTypeChange={(id, bt) =>
+                 setProjects((prev) => prev.map((x) => x.zohoId === id ? { ...x, boardType: bt } : x))
+               }
               onHide={handleHide}
-              onNavigate={(id, sprintId) => navigate(`/board/${id}${sprintId ? `?sprintId=${sprintId}` : ''}`)}
+               onNavigate={(id, sprintId) => {
+                 if (sprintId === 'backlog') {
+                   navigate(`/backlog/${id}`);
+                 } else {
+                   navigate(`/board/${id}${sprintId ? `?sprintId=${sprintId}` : ''}`);
+                 }
+               }}
+
               onDragStart={(e) => handleDragStart(e, i)}              onDragOver={(e) => handleDragOver(e, i)}
               onDrop={() => handleDrop(i)}
               onDragEnd={handleDragEnd}
@@ -441,14 +450,14 @@ export function Projects() {
           {hiddenOpen && (
             <div style={s.grid}>
               {hidden.map((p) => (
-                <div key={p.id} style={s.hiddenCard}>
+                <div key={p.zohoId} style={s.hiddenCard}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
                     <div style={{ ...s.avatarSm, backgroundColor: avatarColor(p.name) }}>
                       {p.prefix ?? initials(p.name)}
                     </div>
                     <span style={s.hiddenName}>{p.name}</span>
                   </div>
-                  <button style={s.unhideBtn} onClick={() => handleUnhide(p.id)}>Show</button>
+                  <button style={s.unhideBtn} onClick={() => handleUnhide(p.zohoId)}>Show</button>
                 </div>
               ))}
             </div>

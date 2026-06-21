@@ -13,7 +13,7 @@ import axios from 'axios';
 import prisma from '../../db/client';
 import { syncZohoProjects } from '../../services/zohoProjects';
 import { syncSprintHealth } from '../../services/zohoSprints';
-import { queryIssues, querySprintEpics, queryKanbanIssues } from '../../services/issueQueries';
+import { queryIssues, querySprintEpics, queryKanbanBoardIssues, queryBacklogIssues, queryBacklogStats } from '../../services/issueQueries';
 import { touchLastSyncedAt } from '../../services/syncStatus';
 
 const router = Router();
@@ -147,7 +147,7 @@ type BoardType = (typeof VALID_BOARD_TYPES)[number];
  * PATCH /api/projects/:id/board-type — Set the board type for a project.
  * @route PATCH /api/projects/:id/board-type
  * @method PATCH
- * @param {string} id - Project's primary DB id (not zohoId)
+ * @param {string} id - Project's zohoId (primary key)
  * @body {Object} body: { boardType: 'scrum' | 'kanban' | 'other' }
  * @returns {Object} - Updated project object
  *   { project: Project }
@@ -168,7 +168,7 @@ router.patch('/:id/board-type', async (req, res) => {
       return;
     }
 
-    const project = await prisma.project.update({ where: { id }, data: { boardType } });
+    const project = await prisma.project.update({ where: { zohoId: id }, data: { boardType } });
     res.json({ project });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
@@ -181,7 +181,7 @@ router.patch('/:id/board-type', async (req, res) => {
  * PATCH /api/projects/:id/display — Toggle hidden or update display order for kanban columns.
  * @route PATCH /api/projects/:id/display
  * @method PATCH
- * @param {string} id - Project's primary DB id (not zohoId)
+ * @param {string} id - Project's zohoId (primary key)
  * @body {Object} body: { hidden?: boolean, displayOrder?: number } (optional fields)
  * @returns {Object} - Updated project object
  *   { project: Project }
@@ -201,7 +201,7 @@ router.patch('/:id/display', async (req, res) => {
     if (hidden !== undefined) data.hidden = hidden;
     if (displayOrder !== undefined) data.displayOrder = displayOrder;
 
-    const project = await prisma.project.update({ where: { id }, data });
+    const project = await prisma.project.update({ where: { zohoId: id }, data });
     res.json({ project });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
@@ -236,8 +236,8 @@ router.post('/reorder', async (req, res) => {
     }
 
     await prisma.$transaction(
-      orderedIds.map((id, index) =>
-        prisma.project.update({ where: { id }, data: { displayOrder: index } })
+      orderedIds.map((zohoId, index) =>
+        prisma.project.update({ where: { zohoId }, data: { displayOrder: index } })
       )
     );
 
@@ -253,8 +253,8 @@ router.post('/reorder', async (req, res) => {
  * GET /api/projects/:id/sprints/:sprintId/issues — Fetch issue list for a specific sprint with filters.
  * @route GET /api/projects/:id/sprints/:sprintId/issues?status=...&statusGroup=...&epicId=...&userId=...
  * @method GET
- * @param {string} id - Project's primary DB id (not zohoId)
- * @params {string} sprintId - Sprint's primary DB id (not zohoId)
+ * @param {string} id - Project's zohoId (primary key)
+ * @params {string} sprintId - Sprint's zohoId (primary key)
  * @query status (optional, single value) - Filter by exact status: todo, in_progress, done, closed, resolved
  * @query statusGroup (optional) - Filter by bucket: 'todo', 'doing' (in_progress), or 'done'
  * @query epicId (optional) - Filter by Epic's zohoId if issue is assigned to one
@@ -276,10 +276,10 @@ router.get('/:id/sprints/:sprintId/issues', async (req, res) => {
   try {
     const { id, sprintId } = req.params;
 
-    const project = await prisma.project.findUnique({ where: { id } });
+    const project = await prisma.project.findUnique({ where: { zohoId: id } });
     if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
 
-    const sprint = await prisma.sprint.findFirst({ where: { id: sprintId } });
+    const sprint = await prisma.sprint.findFirst({ where: { zohoId: sprintId } });
     if (!sprint)  { res.status(404).json({ error: 'Sprint not found'  }); return; }
 
     const statusFilter       = req.query.status        ? String(req.query.status)       : undefined;
@@ -304,8 +304,8 @@ router.get('/:id/sprints/:sprintId/issues', async (req, res) => {
  * GET /api/projects/:id/sprints/:sprintId/epics — Fetch epic breakdown and status groups for a sprint.
  * @route GET /api/projects/:id/sprints/:sprintId/epics?staleDays=N (optional)
  * @method GET
- * @param {string} id - Project's primary DB id (not zohoId)
- * @params {string} sprintId - Sprint's primary DB id (not zohoId)
+ * @param {string} id - Project's zohoId (primary key)
+ * @params {string} sprintId - Sprint's zohoId (primary key)
  * @query staleDays (optional, default: 7) - Days since last update to consider issue stale
  * @query watchedStates (optional) - Comma-separated list of statuses to watch
  * @returns {Object} - Epic-level metrics grouped by status
@@ -322,10 +322,10 @@ router.get('/:id/sprints/:sprintId/epics', async (req, res) => {
   try {
     const { id, sprintId } = req.params;
 
-    const project = await prisma.project.findUnique({ where: { id } });
+    const project = await prisma.project.findUnique({ where: { zohoId: id } });
     if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
 
-    const sprint = await prisma.sprint.findFirst({ where: { id: sprintId } });
+    const sprint = await prisma.sprint.findFirst({ where: { zohoId: sprintId } });
     if (!sprint)  { res.status(404).json({ error: 'Sprint not found'  }); return; }
 
     const staleDays     = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
@@ -345,8 +345,8 @@ router.get('/:id/sprints/:sprintId/epics', async (req, res) => {
  * GET /api/projects/:id/sprints/:sprintId/raiser-stats — Per-creator (ticket raiser) stats by status.
  * @route GET /api/projects/:id/sprints/:sprintId/raiser-stats
  * @method GET
- * @param {string} id - Project's primary DB id (not zohoId)
- * @params {string} sprintId - Sprint's primary DB id (not zohoId)
+ * @param {string} id - Project's zohoId (primary key)
+ * @params {string} sprintId - Sprint's zohoId (primary key)
  * @returns {Object} - Per-creator ticket counts across all statuses
  *   { raisers: Array<{ id, name, role, todo, doing, done }> } - Sorted by total tickets raised (descending)
  * @notes
@@ -359,10 +359,10 @@ router.get('/:id/sprints/:sprintId/raiser-stats', async (req, res) => {
   try {
     const { id, sprintId } = req.params;
 
-    const project = await prisma.project.findUnique({ where: { id } });
+    const project = await prisma.project.findUnique({ where: { zohoId: id } });
     if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
 
-    const sprint = await prisma.sprint.findFirst({ where: { id: sprintId } });
+    const sprint = await prisma.sprint.findFirst({ where: { zohoId: sprintId } });
     if (!sprint)  { res.status(404).json({ error: 'Sprint not found'  }); return; }
 
     const issues = await queryIssues(project.zohoId, sprint.zohoId);
@@ -405,7 +405,7 @@ router.get('/:id/sprints/:sprintId/raiser-stats', async (req, res) => {
  * GET /api/projects/:id/kanban-raiser-stats — Per-creator ticket counts for kanban boards.
  * @route GET /api/projects/:id/kanban-raiser-stats
  * @method GET
- * @param {string} id - Project's primary DB id (not zohoId)
+ * @param {string} id - Project's zohoId (primary key)
  * @returns {Object} - Per-creator ticket counts across all statuses
  *   { raisers: Array<{ id, name, role, todo, doing, done }> } - Sorted by total tickets raised (descending)
  * @notes
@@ -418,10 +418,10 @@ router.get('/:id/kanban-raiser-stats', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const project = await prisma.project.findUnique({ where: { id } });
+    const project = await prisma.project.findUnique({ where: { zohoId: id } });
     if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
 
-    const issues = await queryKanbanIssues(project.zohoId);
+    const issues = await queryKanbanBoardIssues(project.zohoId);
 
     // Aggregate per creator (ticket raiser)
     const map = new Map<string, {
@@ -461,8 +461,8 @@ router.get('/:id/kanban-raiser-stats', async (req, res) => {
  * GET /api/projects/:id/sprints/:sprintId/user-stats — Per-user (assignee) workload stats for a sprint.
  * @route GET /api/projects/:id/sprints/:sprintId/user-stats?staleDays=N (optional)
  * @method GET
- * @param {string} id - Project's primary DB id (not zohoId)
- * @params {string} sprintId - Sprint's primary DB id (not zohoId)
+ * @param {string} id - Project's zohoId (primary key)
+ * @params {string} sprintId - Sprint's zohoId (primary key)
  * @query staleDays (optional, default: 7) - Days since last update to consider issue stale
  * @query watchedStates (optional) - Comma-separated list of statuses to watch
  * @returns {Object} - Per-user workload breakdown for assigned tickets
@@ -484,10 +484,10 @@ router.get('/:id/sprints/:sprintId/user-stats', async (req, res) => {
     const staleDays = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
     const watchedStates = req.query.watchedStates ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean) : [];
 
-    const project = await prisma.project.findUnique({ where: { id } });
+    const project = await prisma.project.findUnique({ where: { zohoId: id } });
     if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
 
-    const sprint = await prisma.sprint.findFirst({ where: { id: sprintId } });
+    const sprint = await prisma.sprint.findFirst({ where: { zohoId: sprintId } });
     if (!sprint)  { res.status(404).json({ error: 'Sprint not found'  }); return; }
 
     // Fetch ALL issues for this sprint (don't filter by stale here)
@@ -549,7 +549,7 @@ router.get('/:id/sprints/:sprintId/user-stats', async (req, res) => {
  * GET /api/projects/:id — Fetch a single project with its active sprints.
  * @route GET /api/projects/:id
  * @method GET
- * @param {string} id - Project's primary DB id (not zohoId)
+ * @param {string} id - Project's zohoId (primary key)
  * @returns {Object} - Single project object with active sprints attached
  *   { 
  *     project: Project & { projNo?: string, activeSprints: Sprint[] } 
@@ -563,7 +563,7 @@ router.get('/:id/sprints/:sprintId/user-stats', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const project = await prisma.project.findUnique({ where: { id } });
+    const project = await prisma.project.findUnique({ where: { zohoId: id } });
     
     if (!project) { 
       res.status(404).json({ error: 'Project not found' }); 
@@ -587,7 +587,7 @@ router.get('/:id', async (req, res) => {
  * GET /api/projects/:id/kanban-user-stats — Per-user workload stats for a kanban board.
  * @route GET /api/projects/:id/kanban-user-stats?staleDays=N (optional)
  * @method GET
- * @param {string} id - Project's primary DB id (not zohoId)
+ * @param {string} id - Project's zohoId (primary key)
  * @query staleDays (optional, default: 7) - Days since last update to consider issue stale
  * @query watchedStates (optional) - Comma-separated list of statuses to watch
  * @query userId (optional) - Filter by user (creator or assignee)
@@ -607,7 +607,7 @@ router.get('/:id', async (req, res) => {
  * GET /api/projects/:id/kanban/issues — Fetch issue list for a kanban board with filters.
  * @route GET /api/projects/:id/kanban/issues?status=...&statusGroup=...&epicId=...&userId=...
  * @method GET
- * @param {string} id - Project's primary DB id (not zohoId)
+ * @param {string} id - Project's zohoId (primary key)
  * @query status (optional) - Filter by exact status string
  * @query statusGroup (optional) - Filter by work bucket (todo/doing/done)
  * @query epicId (optional) - Filter by Epic ID
@@ -627,7 +627,7 @@ router.get('/:id/kanban/issues', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const project = await prisma.project.findUnique({ where: { id } });
+    const project = await prisma.project.findUnique({ where: { zohoId: id } });
     if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
 
     const statusFilter       = req.query.status        ? String(req.query.status)       : undefined;
@@ -639,7 +639,7 @@ router.get('/:id/kanban/issues', async (req, res) => {
     const staleDays          = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
     const watchedStates      = req.query.watchedStates ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean) : [];
 
-    const issues = await queryKanbanIssues(project.zohoId, staleDays, watchedStates, userFilter, creatorOnly);
+    const issues = await queryKanbanBoardIssues(project.zohoId, staleDays, watchedStates, userFilter, creatorOnly);
 
     // Apply additional filters at query time (status, statusGroup, epic, stale)
     const filtered = issues.filter((issue): boolean => {
@@ -666,12 +666,12 @@ router.get('/:id/kanban-user-stats', async (req, res) => {
     const userIdFilter = req.query.userId ? String(req.query.userId) : undefined;
     const creatorOnly = req.query.creatorOnly === 'true';
 
-    const project = await prisma.project.findUnique({ where: { id } });
+    const project = await prisma.project.findUnique({ where: { zohoId: id } });
     if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
 
     // Fetch ALL issues for this project (don't filter by stale here)
     // The isStale flag will be computed correctly based on watchedStates
-    const issues = await queryKanbanIssues(project.zohoId, staleDays, watchedStates, userIdFilter, creatorOnly);
+    const issues = await queryKanbanBoardIssues(project.zohoId, staleDays, watchedStates, userIdFilter, creatorOnly);
 
     // Filter issues to only those in watched states for bar graph calculation
     const issuesInWatchedStates = issues.filter(issue => {
@@ -728,7 +728,7 @@ router.get('/:id/kanban-user-stats', async (req, res) => {
  * GET /api/projects/:id/kanban/stale-count — Get count of stale issues for a kanban board.
  * @route GET /api/projects/:id/kanban/stale-count?staleDays=...&watchedStates=...
  * @method GET
- * @param {string} id - Project's primary DB id (not zohoId)
+ * @param {string} id - Project's zohoId (primary key)
  * @query staleDays (optional, default: 7) - Days since last update to consider issue stale
  * @query watchedStates (optional) - Comma-separated list of statuses to watch
  * @returns {Object} - Stale count
@@ -742,13 +742,13 @@ router.get('/:id/kanban/stale-count', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const project = await prisma.project.findUnique({ where: { id } });
+    const project = await prisma.project.findUnique({ where: { zohoId: id } });
     if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
 
     const staleDays = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
     const watchedStates = req.query.watchedStates ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean) : [];
 
-    const issues = await queryKanbanIssues(project.zohoId, staleDays, watchedStates, undefined, false);
+    const issues = await queryKanbanBoardIssues(project.zohoId, staleDays, watchedStates, undefined, false);
 
     // Count unique stale issues (only assigned ones)
     const staleSet = new Set<string>();
@@ -767,6 +767,99 @@ router.get('/:id/kanban/stale-count', async (req, res) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('❌ Kanban stale count fetch failed:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * GET /api/projects/:id/backlog/issues — Fetch backlog issues for a project.
+ * @route GET /api/projects/:id/backlog/issues?status=...&statusGroup=...&epicId=...&userId=...
+ * @method GET
+ * @param {string} id - Project's zohoId (primary key)
+ * @query status (optional) - Filter by exact status string
+ * @query statusGroup (optional) - Filter by work bucket (todo/doing/done)
+ * @query epicId (optional) - Filter by Epic ID
+ * @query userId (optional) - Filter by user (creator or assignee)
+ * @query creatorOnly (optional, true/false) - Only return issues created by user
+ * @query stale (optional, true/false) - Only return issues marked as stale
+ * @query staleDays (optional, default: 7) - Days since last update to consider issue stale
+ * @query watchedStates (optional) - Comma-separated list of statuses to watch
+ * @returns {Object} - Issue list
+ *   { issues: Issue[] } - Array of issue objects matching all filter criteria
+ * @notes
+ *   - Backlog issues are items NOT yet on any sprint or kanban board
+ *   - All filters are applied at query time (status, statusGroup, epic, user, stale)
+ * @auth Required (OAuth token validation)
+ */
+router.get('/:id/backlog/issues', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const project = await prisma.project.findUnique({ where: { zohoId: id } });
+    if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
+
+    const statusFilter       = req.query.status        ? String(req.query.status)       : undefined;
+    const statusGroupFilter  = req.query.statusGroup   ? String(req.query.statusGroup)  : undefined;
+    const epicFilter         = req.query.epicId        ? String(req.query.epicId)        : undefined;
+    const userFilter         = req.query.userId        ? String(req.query.userId)        : undefined;
+    const creatorOnly        = req.query.creatorOnly   === 'true';
+    const staleOnly          = req.query.stale         === 'true';
+    const staleDays          = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
+    const watchedStates      = req.query.watchedStates ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean) : [];
+
+    const issues = await queryBacklogIssues(project.zohoId, staleDays, watchedStates, userFilter, creatorOnly);
+
+    // Apply additional filters at query time (status, statusGroup, epic, stale)
+    const filtered = issues.filter((issue): boolean => {
+      if (statusFilter      && issue.status      !== statusFilter)      return false;
+      if (statusGroupFilter && issue.statusGroup  !== statusGroupFilter) return false;
+      if (epicFilter && issue.epicId !== epicFilter) return false;
+      if (staleOnly && !issue.isStale) return false;
+      return true;
+    });
+
+    res.json({ issues: filtered });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('❌ Backlog issue fetch failed:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * GET /api/projects/:id/backlog-stats — Backlog statistics for a project.
+ * @route GET /api/projects/:id/backlog-stats?staleDays=N&watchedStates=...
+ * @method GET
+ * @param {string} id - Project's zohoId (primary key)
+ * @query staleDays (optional, default: 7) - Days since last update to consider issue stale
+ * @query watchedStates (optional) - Comma-separated list of statuses to watch
+ * @returns {Object} - Backlog statistics
+ *   {
+ *     summary: { total, staleCount, statusGroups: { todo, doing, done } }
+ *     oldestItems: Issue[] - Oldest items sorted by createdAt ascending
+ *     assignees: Array<{ id, name, role, count }> - Sorted by count descending
+ *   }
+ * @notes
+ *   - Scrum: backlog = issues from non-active sprints (past/future)
+ *   - Kanban: backlog = issues with statusGroup = 'todo' only
+ *   - Zero overlap with BoardPage data
+ * @auth Required (OAuth token validation)
+ */
+router.get('/:id/backlog-stats', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const staleDays = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
+    const watchedStates = req.query.watchedStates ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean) : [];
+
+    const project = await prisma.project.findUnique({ where: { zohoId: id } });
+    if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
+
+    const stats = await queryBacklogStats(project.zohoId, staleDays, watchedStates);
+
+    res.json(stats);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('❌ Backlog stats fetch failed:', msg);
     res.status(500).json({ error: msg });
   }
 });

@@ -623,8 +623,8 @@ async function syncEpics(teamId: string, projectZohoId: string): Promise<number>
         const name = String(f[nameIdx] ?? 'Unnamed Epic').trim();
 
         await prisma.epic.upsert({
-          where: { zohoId_projectZohoId: { zohoId: id, projectZohoId } },
-          update: { name, syncedAt: new Date() },
+          where: { zohoId: id },
+          update: { projectZohoId, name, syncedAt: new Date() },
           create: {
             zohoId: id,
             projectZohoId,
@@ -759,8 +759,10 @@ async function syncIssues(
         const endDate = targetDateIdx >= 0 ? String(f[targetDateIdx] ?? '').trim() || undefined : undefined;
 
         await prisma.issue.upsert({
-          where: { zohoId_sprintZohoId: { zohoId: itemId, sprintZohoId } },
+          where: { zohoId: itemId },
           update: {
+            sprintZohoId,
+            projectZohoId,
             itemNo,
             title,
             status: statusName,
@@ -983,17 +985,24 @@ export async function syncAll(): Promise<number> {
       // Phase 3b: Sync status map (populates Project.statusMap in DB)
       const { map: statusMap, orderedNames, statusGroups } = await fetchStatusMapFromZoho(teamId, project.zohoId);
 
-      // Backlog count (using status map for breakdown, but we only store count for scrum)
+      // Backlog count and sync backlog issues
       const backlogResult = await fetchBacklogItems(teamId, project.zohoId, statusMap);
       if (backlogResult !== null) {
         await prisma.project.update({
           where: { zohoId: project.zohoId },
-          data: { backlogCount: backlogResult.count },
+          data: { 
+            backlogCount: backlogResult.count,
+            backlogZohoId: backlogResult.backlogId 
+          },
         });
+        // Sync backlog issues to the Issue table using backlogId as sprintZohoId
+        await syncIssues(teamId, project.zohoId, backlogResult.backlogId, 'active');
       }
 
       const sprints = await fetchSprintsForProject(teamId, project.zohoId);
       if (sprints.length === 0) continue;
+
+      let lastSprintBreakdown: Record<string, number> | null = null;
 
       for (const sprint of sprints) {
         const rawCounts = await fetchItemsForSprint(teamId, project.zohoId, sprint.zohoId, statusMap);
@@ -1009,13 +1018,15 @@ export async function syncAll(): Promise<number> {
         const totalTickets = Object.values(statusBreakdown).reduce((a, b) => a + b, 0);
 
         await prisma.sprint.upsert({
-          where:  { zohoId_projectZohoId: { zohoId: sprint.zohoId, projectZohoId: project.zohoId } },
+          where:  { zohoId: sprint.zohoId },
           update: {
+            projectZohoId: project.zohoId,
             name: sprint.name, status: sprint.status,
             startDate: sprint.startDate, endDate: sprint.endDate,
             totalTickets,
             statusBreakdown: JSON.stringify(statusBreakdown),
             rawData: JSON.stringify({ sprint, statusBreakdown, statusGroups }),
+            projectName: project.name,
           },
           create: {
             zohoId: sprint.zohoId, projectZohoId: project.zohoId,
@@ -1037,8 +1048,18 @@ export async function syncAll(): Promise<number> {
           .reduce((sum, [, n]) => sum + n, 0);
         await recordBurndownSnapshot(sprint.zohoId, doneCount, totalTickets);
 
+        lastSprintBreakdown = statusBreakdown;
         synced++;
       }
+
+      // Persist project-level status breakdown and groups for analytics queries
+      await prisma.project.update({
+        where: { zohoId: project.zohoId },
+        data: {
+          statusBreakdown: lastSprintBreakdown ? JSON.stringify(lastSprintBreakdown) : null,
+          statusGroups: JSON.stringify(statusGroups),
+        },
+      });
     } catch (err) {
       console.error(`  ❌ Failed for ${project.name}:`, err instanceof Error ? err.message : err);
     }
@@ -1071,6 +1092,11 @@ export async function syncAll(): Promise<number> {
       // Kanban projects have a separate "backlog" of unassigned items
       const backlogResult = await fetchBacklogItems(teamId, project.zohoId, statusMap);
       const backlogCount = backlogResult?.count ?? 0;
+
+      // Sync backlog issues to the Issue table using backlogId as sprintZohoId
+      if (backlogResult !== null) {
+        await syncIssues(teamId, project.zohoId, backlogResult.backlogId, 'active');
+      }
 
       // Find kanban board sprint (type=[7] - special Zoho sprint type for boards)
       // If no board exists yet (first item hasn't been created/moved), returns null
@@ -1110,6 +1136,7 @@ export async function syncAll(): Promise<number> {
         where: { zohoId: project.zohoId },
         data: {
           backlogCount,      // Total items in backlog
+          backlogZohoId: backlogResult?.backlogId ?? null,  // Zoho backlog ID for identifying backlog issues
           statusBreakdown: JSON.stringify(statusBreakdown),  // By-status breakdown
           statusGroups:    JSON.stringify(statusGroups),     // Work stage mapping
         },

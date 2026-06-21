@@ -36,7 +36,7 @@
  */
 
 import prisma from '../db/client';
-import { Prisma } from '@prisma/client';
+
 import type { IssueItem, EpicBreakdown } from './zohoSprints';
 
 // ── Shared types ──────────────────────────────────────────────────────────────
@@ -444,42 +444,114 @@ export async function queryIssues(
  * @param userFilter - Optional: filter by specific user (creator or assignee)
  * @param creatorOnly - If true, only return issues created by the user
  *
- * @returns Array of IssueItems for all issues in the kanban board
+ * @returns Array of IssueItems for all issues in the kanban board (excluding backlog)
  */
-export async function queryKanbanIssues(
+export async function queryKanbanBoardIssues(
   projectZohoId: string,
   staleDays: number = 7,
   watchedStates: string[] = [],
   userFilter?: string,
   creatorOnly?: boolean,
 ): Promise<IssueItem[]> {
+  // Identify kanban board sprint IDs (type=[7] sprints)
+  const kanbanSprints = await prisma.sprint.findMany({
+    where: { projectZohoId },
+    select: { zohoId: true, rawData: true },
+  });
+  
+  const kanbanSprintIds = new Set<string>();
+  for (const sprint of kanbanSprints) {
+    if (sprint.rawData) {
+      try {
+        const parsed = JSON.parse(sprint.rawData);
+        if (parsed?.sprint?.statusCode === 7) {
+          kanbanSprintIds.add(sprint.zohoId);
+        }
+      } catch { /* skip invalid JSON */ }
+    }
+  }
+  
+  // Filter to only kanban board issues (exclude backlog)
   const dbIssues = await prisma.issue.findMany({
     where: { projectZohoId },
   });
-
+  
   const userMap = await buildUserMap();
+  const kanbanIssues = dbIssues.filter(i => kanbanSprintIds.has(i.sprintZohoId));
   
   // Transform raw DB rows to enriched IssueItems with computed fields
-  let issues = dbIssues.map(i => toIssueItem(i, userMap, staleDays, watchedStates));
+  let filteredIssues: IssueItem[] = kanbanIssues.map(i => toIssueItem(i, userMap, staleDays, watchedStates));
   
-  // Filter by watched states if configured (for staleness calculation and bar graph)
-  // If watchedStates is empty, show all issues (default behavior)
+  // Filter by watched states if configured
   if (watchedStates.length > 0) {
-    const filtered = issues.filter(issue => watchedStates.includes(issue.status));
-    issues = filtered;
+    filteredIssues = filteredIssues.filter(issue => watchedStates.includes(issue.status));
   }
   
   // Apply optional user/creator filters
   if (userFilter || creatorOnly) {
-    const filtered = issues.filter(issue => {
-      const matchesUserFilter = userFilter ? (issue.creator?.id === userFilter || issue.assignees?.some(a => a.id === userFilter)) : true;
+    filteredIssues = filteredIssues.filter(issue => {
+      const matchesUserFilter = userFilter ? (issue.creator?.id === userFilter || issue.assignees.some(a => a.id === userFilter)) : true;
       const matchesCreatorOnly = creatorOnly ? (issue.creator?.id === userFilter) : true;
       return matchesUserFilter && matchesCreatorOnly;
     });
-    return filtered;
   }
   
-  return issues;
+  return filteredIssues;
+}
+
+/**
+ * Query backlog issues for a project.
+ * Backlog issues are stored with sprintZohoId = backlogId from Zoho.
+ * This is used to display backlog items on the backlog board.
+ *
+ * @param projectZohoId - The Zoho ID of the project
+ * @param staleDays - Threshold in days for staleness (default: 7)
+ * @param watchedStates - Array of statuses to watch for staleness
+ * @param userFilter - Optional: filter by specific user (creator or assignee)
+ * @param creatorOnly - If true, only return issues created by the user
+ *
+ * @returns Array of IssueItems for all backlog issues
+ */
+export async function queryBacklogIssues(
+  projectZohoId: string,
+  staleDays: number = 7,
+  watchedStates: string[] = [],
+  userFilter?: string,
+  creatorOnly?: boolean,
+): Promise<IssueItem[]> {
+  const project = await prisma.project.findUnique({
+    where: { zohoId: projectZohoId },
+    select: { backlogZohoId: true },
+  });
+  
+  if (!project?.backlogZohoId) {
+    return [];
+  }
+  
+  const dbIssues = await prisma.issue.findMany({
+    where: {
+      projectZohoId,
+      sprintZohoId: project.backlogZohoId,
+    },
+  });
+  
+  const userMap = await buildUserMap();
+  
+  let backlogIssues: IssueItem[] = dbIssues.map(i => toIssueItem(i, userMap, staleDays, watchedStates));
+  
+  if (watchedStates.length > 0) {
+    backlogIssues = backlogIssues.filter(issue => watchedStates.includes(issue.status));
+  }
+  
+  if (userFilter || creatorOnly) {
+    backlogIssues = backlogIssues.filter(issue => {
+      const matchesUserFilter = userFilter ? (issue.creator?.id === userFilter || issue.assignees.some(a => a.id === userFilter)) : true;
+      const matchesCreatorOnly = creatorOnly ? (issue.creator?.id === userFilter) : true;
+      return matchesUserFilter && matchesCreatorOnly;
+    });
+  }
+  
+  return backlogIssues;
 }
 
 /**
@@ -833,7 +905,7 @@ export async function queryUserIssues(
   // Raw query using json_each to find issues where user is assignee or creator
   // SQLite json_each lets us search inside the JSON array without loading all issues
   type RawIssueRow = {
-    id: string; zohoId: string; sprintZohoId: string; projectZohoId: string;
+    zohoId: string; sprintZohoId: string; projectZohoId: string;
     itemNo: string; title: string; status: string; statusGroup: string;
     epicZohoId: string | null; creatorZohoId: string | null;
     assigneeIds: string; createdAt: string | null; endDate: string | null;
@@ -867,9 +939,9 @@ export async function queryUserIssues(
     const base = toIssueItem(i, userMap, staleDays, watchedStates);
     return {
       ...base,
-      sprintId:    sprint?.id    ?? '',
+      sprintId:    sprint?.zohoId    ?? '',
       sprintName:  sprint?.name  ?? i.sprintZohoId,
-      projectId:   project?.id   ?? '',
+      projectId:   project?.zohoId   ?? '',
       projectName: project?.name ?? i.projectZohoId,
     };
   });
@@ -1006,7 +1078,7 @@ export async function queryUserSprintHistory(
     const project = projectByZohoId.get(sprint.projectZohoId);
     
     history.push({
-      sprintId:      sprint.id,
+      sprintId:      sprint.zohoId,
       sprintName:    sprint.name,
       projectName:   project?.name ?? sprint.projectZohoId,
       status:        sprint.status,
@@ -1022,4 +1094,147 @@ export async function queryUserSprintHistory(
   history.reverse(); // Now in chronological order (oldest first)
 
   return history;
+}
+
+/**
+ * Backlog statistics response structure.
+ * Used by the BacklogPage to display summary, oldest items, and assignee distribution.
+ */
+export interface BacklogStats {
+  summary: {
+    total: number;
+    staleCount: number;
+    statusGroups: {
+      todo: number;
+      doing: number;
+      done: number;
+    };
+  };
+  oldestItems: IssueItem[];
+  assignees: Array<{
+    id: string;
+    name: string;
+    role: string;
+    count: number;
+  }>;
+}
+
+/**
+ * Query backlog statistics for a project.
+ * 
+ * Data sources:
+ * - Scrum boards: issues from non-active sprints only (status = 'past' or 'future')
+ * - Kanban boards: issues with statusGroup = 'todo' only
+ * 
+ * @param projectZohoId - The Zoho ID of the project
+ * @param staleDays - Threshold in days for staleness (default: 7)
+ * @param watchedStates - Array of statuses to watch for staleness
+ * @async Performs database queries, returns when complete
+ * @returns BacklogStats with summary, oldest items, and assignee distribution
+ */
+export async function queryBacklogStats(
+  projectZohoId: string,
+  staleDays: number = 7,
+  watchedStates: string[] = [],
+): Promise<BacklogStats> {
+  const project = await prisma.project.findUnique({
+    where: { zohoId: projectZohoId },
+    select: { boardType: true, backlogZohoId: true },
+  });
+
+  if (!project) {
+    return {
+      summary: { total: 0, staleCount: 0, statusGroups: { todo: 0, doing: 0, done: 0 } },
+      oldestItems: [],
+      assignees: [],
+    };
+  }
+
+  let dbIssues: Array<{
+    zohoId: string;
+    itemNo: string;
+    title: string;
+    status: string;
+    statusGroup: string;
+    epicZohoId: string | null;
+    creatorZohoId: string | null;
+    assigneeIds: string;
+    createdAt: string | null;
+    endDate: string | null;
+  }>;
+
+  if (project.boardType === 'kanban') {
+    // Kanban: backlog = todo status group only
+    dbIssues = await prisma.issue.findMany({
+      where: {
+        projectZohoId,
+        statusGroup: 'todo',
+      },
+    });
+  } else {
+    // Scrum: backlog = issues from non-active sprints (past or future)
+    const nonActiveSprintIds = await prisma.sprint
+      .findMany({
+        where: {
+          projectZohoId,
+          status: { in: ['past', 'future'] },
+        },
+        select: { zohoId: true },
+      })
+      .then(sprints => sprints.map(s => s.zohoId));
+
+    dbIssues = await prisma.issue.findMany({
+      where: {
+        projectZohoId,
+        sprintZohoId: { in: nonActiveSprintIds },
+      },
+    });
+  }
+
+  const userMap = await buildUserMap();
+
+  const enrichedIssues: IssueItem[] = dbIssues.map(i =>
+    toIssueItem(i, userMap, staleDays, watchedStates),
+  );
+
+  // Compute summary
+  let staleCount = 0;
+  const statusGroups = { todo: 0, doing: 0, done: 0 };
+  const assigneeCounts = new Map<string, { id: string; name: string; role: string; count: number }>();
+
+  for (const issue of enrichedIssues) {
+    if (issue.isStale) staleCount++;
+    statusGroups[issue.statusGroup as 'todo' | 'doing' | 'done']++;
+
+    // Collect assignees
+    for (const assignee of issue.assignees) {
+      let entry = assigneeCounts.get(assignee.id);
+      if (!entry) {
+        entry = { id: assignee.id, name: assignee.name, role: assignee.role, count: 0 };
+        assigneeCounts.set(assignee.id, entry);
+      }
+      entry.count++;
+    }
+  }
+
+  // Sort assignees by count descending
+  const assignees = [...assigneeCounts.values()].sort((a, b) => b.count - a.count);
+
+  // Sort items by createdAt ascending (oldest first), nulls last
+  const sortedByAge = [...enrichedIssues].sort((a, b) => {
+    if (!a.createdAt && !b.createdAt) return 0;
+    if (!a.createdAt) return 1;
+    if (!b.createdAt) return -1;
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
+
+  return {
+    summary: {
+      total: enrichedIssues.length,
+      staleCount,
+      statusGroups,
+    },
+    oldestItems: sortedByAge,
+    assignees,
+  };
 }
