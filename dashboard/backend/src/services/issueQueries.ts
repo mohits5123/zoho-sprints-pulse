@@ -1172,21 +1172,23 @@ export async function queryBacklogStats(
       },
     });
   } else {
-    // Scrum: backlog = issues from non-active sprints (past or future)
-    const nonActiveSprintIds = await prisma.sprint
-      .findMany({
-        where: {
-          projectZohoId,
-          status: { in: ['past', 'future'] },
-        },
-        select: { zohoId: true },
-      })
-      .then(sprints => sprints.map(s => s.zohoId));
+    // Scrum: backlog = issues with sprintZohoId = backlogZohoId
+    const backlogProject = await prisma.project.findUnique({
+      where: { zohoId: projectZohoId },
+      select: { backlogZohoId: true },
+    });
+    if (!backlogProject?.backlogZohoId) {
+      return {
+        summary: { total: 0, staleCount: 0, statusGroups: { todo: 0, doing: 0, done: 0 } },
+        oldestItems: [],
+        assignees: [],
+      };
+    }
 
     dbIssues = await prisma.issue.findMany({
       where: {
         projectZohoId,
-        sprintZohoId: { in: nonActiveSprintIds },
+        sprintZohoId: backlogProject.backlogZohoId,
       },
     });
   }

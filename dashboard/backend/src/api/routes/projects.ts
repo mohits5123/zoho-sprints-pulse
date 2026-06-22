@@ -840,8 +840,8 @@ router.get('/:id/backlog/issues', async (req, res) => {
  *     assignees: Array<{ id, name, role, count }> - Sorted by count descending
  *   }
  * @notes
- *   - Scrum: backlog = issues from non-active sprints (past/future)
- *   - Kanban: backlog = issues with statusGroup = 'todo' only
+  *   - Scrum: backlog = issues with sprintZohoId = backlogZohoId
+  *   - Kanban: backlog = issues with statusGroup = 'todo' only
  *   - Zero overlap with BoardPage data
  * @auth Required (OAuth token validation)
  */
