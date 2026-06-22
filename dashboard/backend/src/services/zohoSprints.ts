@@ -1347,6 +1347,46 @@ export async function syncAll(): Promise<number> {
         
         // Sync issues for the kanban board (treated as "active" sprint)
         await syncIssues(teamId, project.zohoId, kanbanBoardId, 'active');
+
+        // Create/update Sprint record so queryKanbanBoardIssues can identify this board
+        // The statusCode=7 marker is used by queryKanbanBoardIssues to filter kanban issues
+        const totalTickets = Object.values(boardStatusCounts).reduce((a, b) => a + b, 0);
+        await prisma.sprint.upsert({
+          where:  { zohoId: kanbanBoardId },
+          update: {
+            projectZohoId: project.zohoId,
+            name: `${project.name} Board`,
+            status: 'active',
+            startDate: null,
+            endDate: null,
+            totalTickets,
+            statusBreakdown: JSON.stringify(boardStatusCounts),
+            rawData: JSON.stringify({ sprint: { statusCode: 7 }, statusBreakdown: boardStatusCounts, statusGroups }),
+            projectName: project.name,
+          },
+          create: {
+            zohoId: kanbanBoardId,
+            projectZohoId: project.zohoId,
+            projectName: project.name,
+            name: `${project.name} Board`,
+            status: 'active',
+            startDate: null,
+            endDate: null,
+            totalTickets,
+            statusBreakdown: JSON.stringify(boardStatusCounts),
+            rawData: JSON.stringify({ sprint: { statusCode: 7 }, statusBreakdown: boardStatusCounts, statusGroups }),
+          },
+        });
+      } else {
+        // No kanban board found — clean up any stale sprint records for this project
+        await prisma.sprint.deleteMany({
+          where: {
+            projectZohoId: project.zohoId,
+            rawData: {
+              contains: JSON.stringify({ sprint: { statusCode: 7 } }),
+            },
+          },
+        });
       }
 
       // Build full ordered breakdown (all statuses, zero-filled for missing ones)
