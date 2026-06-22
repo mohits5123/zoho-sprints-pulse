@@ -134,7 +134,7 @@ export function TicketRaiserCard({ projectId, sprintId, boardType, onUserClick }
       ? fetchKanbanRaiserStats(projectId)
       : fetchRaiserStats(projectId, sprintId);
     promise
-      .then(setRaisers)
+      .then((data) => setRaisers(data.filter((r) => r.name !== 'Unknown')))
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
   }, [projectId, sprintId, boardType]);

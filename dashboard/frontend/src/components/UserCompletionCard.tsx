@@ -135,7 +135,7 @@ export function UserCompletionCard({ projectId, sprintId, staleDays = 7, onUserC
 
   // Sort users by completion % descending, then by total tickets as tiebreaker
   const sorted = [...users]
-    .filter((u) => u.todo + u.doing + u.done > 0)
+    .filter((u) => u.name !== 'Unknown' && u.todo + u.doing + u.done > 0)
     .sort((a, b) => {
       const ta = a.todo + a.doing + a.done;
       const tb = b.todo + b.doing + b.done;

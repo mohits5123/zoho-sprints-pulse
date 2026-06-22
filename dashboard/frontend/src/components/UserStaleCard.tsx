@@ -247,6 +247,7 @@ export function UserStaleCard({
             // Aggregate by assignee
             for (const user of issue.assignees) {
               if (!user || !user.id || user.id === '-1') continue;
+              if (user.name === 'Unknown') continue;
               
               let entry = assigneeMap.get(user.id);
               if (!entry) {
@@ -309,6 +310,7 @@ export function UserStaleCard({
             // Aggregate by assignee
             for (const user of issue.assignees) {
               if (!user || !user.id || user.id === '-1') continue;
+              if (user.name === 'Unknown') continue;
               
               let entry = assigneeMap.get(user.id);
               if (!entry) {

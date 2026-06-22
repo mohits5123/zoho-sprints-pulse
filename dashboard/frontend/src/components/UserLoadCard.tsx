@@ -162,9 +162,11 @@ export function UserLoadCard({ projectId, sprintId, staleDays = 7, onUserClick, 
   // Count users with more than 5 active tickets (overloaded threshold)
   const overloaded  = users.filter((u) => u.todo + u.doing > 5).length;
   // Filter out users with 0 issues (todo + doing + done for scrum, todo + doing for kanban)
-  const usersWithIssues = isKanban
-    ? users.filter((u) => u.todo + u.doing > 0)
-    : users.filter((u) => u.todo + u.doing + u.done > 0);
+  const usersWithIssues = users
+    .filter((u) => u.name !== 'Unknown')
+    .filter((u) =>
+      isKanban ? u.todo + u.doing > 0 : u.todo + u.doing + u.done > 0,
+    );
 
   return (
     <div style={s.card}>
