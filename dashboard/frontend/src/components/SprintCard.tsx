@@ -50,6 +50,8 @@ interface SprintCardProps {
   users?: { id: string; name: string; role: string }[];
   /** Callback when a user avatar is clicked (optional) */
   onUserClick?: (userId: string, userName: string) => void;
+  /** Callback when the card is clicked (optional) */
+  onSprintClick?: () => void;
 }
 
 /**
@@ -57,7 +59,7 @@ interface SprintCardProps {
  * Shows sprint name, dates, total tickets, progress bar, and detailed status rows
  * Includes stale ticket warnings and user avatars for assigned team members
  */
-export function SprintCard({ sprint, hideProjectName, staleCount, onStatusClick, onStaleClick, users, onUserClick }: SprintCardProps) {
+export function SprintCard({ sprint, hideProjectName, staleCount, onStatusClick, onStaleClick, users, onUserClick, onSprintClick }: SprintCardProps) {
   const breakdown    = parseBreakdown(sprint.statusBreakdown);
   const statusGroups = parseStatusGroups(sprint.rawData);
   const rawEntries   = Object.entries(breakdown);
@@ -78,7 +80,10 @@ export function SprintCard({ sprint, hideProjectName, staleCount, onStatusClick,
     : null;
 
   return (
-    <div style={{ ...s.card, ...(allDone ? { borderColor: '#22c55e55' } : {}) }}>
+    <div
+      style={{ ...s.card, ...(allDone ? { borderColor: '#22c55e55' } : {}), ...(onSprintClick ? { cursor: 'pointer' } : {}) }}
+      onClick={onSprintClick}
+    >
       {!hideProjectName && <p style={s.projectName}>{sprint.projectName}</p>}
 
       <div style={s.sprintHeader}>

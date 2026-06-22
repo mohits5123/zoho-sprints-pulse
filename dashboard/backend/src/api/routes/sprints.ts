@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import axios from 'axios';
 import prisma from '../../db/client';
-import { syncSprintHealth } from '../../services/zohoSprints';
+import { syncSprintHealth, fetchPastSprintNames, fetchPastSprintData, resolveTeamId } from '../../services/zohoSprints';
 import { syncZohoProjects } from '../../services/zohoProjects';
 import { getAccessToken } from '../../services/zohoAuth';
 import { config } from '../../config';
@@ -258,6 +258,58 @@ router.post('/sync', async (_req, res) => {
       console.error('❌ Sprint sync failed:', message);
     }
   });
+});
+
+/**
+ * POST /api/sprints/fetch-past — Fetch past (completed) sprints for a project.
+ * @route POST /api/sprints/fetch-past
+ * @method POST
+ * @headers Content-Type: application/json
+ * @body { projectZohoId: string, sprintZohoId?: string }
+ *   - If sprintZohoId is omitted: returns list of past sprint names/IDs only
+ *   - If sprintZohoId is provided: fetches full data (issues, burndown) for that sprint
+ * @returns { Object }
+ *   - List mode: { sprints: SprintRaw[] } — sprint metadata only
+ *   - Data mode: { sprint: SprintSnapshot } — fully synced sprint with issues
+ * @notes
+ *   - Two-step flow: first fetch names, then fetch full data per sprint
+ *   - Issues for past sprints are upserted (NOT deleted like regular sync)
+ *   - Burndown snapshots are recorded for each fetched sprint
+ *   - User-triggered only, not part of regular sync
+ * @auth Required (OAuth token validation)
+ */
+router.post('/fetch-past', async (req, res) => {
+  try {
+    const body = req.body as { projectZohoId: string; sprintZohoId?: string };
+    
+    if (!body.projectZohoId) {
+      res.status(400).json({ error: 'projectZohoId is required' });
+      return;
+    }
+
+    const teamId = await resolveTeamId();
+
+    // If sprintZohoId is provided, fetch full data for that specific sprint
+    if (body.sprintZohoId) {
+      const sprintMeta = await fetchPastSprintNames(teamId, body.projectZohoId);
+      const target = sprintMeta.find(s => s.zohoId === body.sprintZohoId);
+      if (!target) {
+        res.status(404).json({ error: `Sprint ${body.sprintZohoId} not found` });
+        return;
+      }
+      const synced = await fetchPastSprintData(teamId, body.projectZohoId, target);
+      res.json({ sprint: synced });
+      return;
+    }
+
+    // Otherwise, return list of past sprint names only (no issues/burndown)
+    const sprintNames = await fetchPastSprintNames(teamId, body.projectZohoId);
+    res.json({ sprints: sprintNames });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('❌ Fetch past sprints failed:', msg);
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 export default router;

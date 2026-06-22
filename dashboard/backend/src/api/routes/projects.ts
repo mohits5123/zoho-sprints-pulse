@@ -56,7 +56,7 @@ function extractProjNo(rawData: string | null): string | null {
 router.get('/', async (_req, res) => {
   try {
     const projects = await prisma.project.findMany({ orderBy: { name: 'asc' } });
-    const sprints  = await prisma.sprint.findMany({ where: { status: 'active' } });
+    const sprints  = await prisma.sprint.findMany({ where: { totalTickets: { not: 0 }, status: 'active' } });
 
     // Group sprints by projectZohoId
     const sprintsByProject: Record<string, typeof sprints> = {};
@@ -103,7 +103,7 @@ router.post('/sync', async (_req, res) => {
     }
 
     const projects = await prisma.project.findMany({ orderBy: { displayOrder: 'asc' } });
-    const sprints  = await prisma.sprint.findMany({ where: { status: 'active' } });
+    const sprints  = await prisma.sprint.findMany({ where: { totalTickets: { not: 0 }, status: 'active' } });
 
     const sprintsByProject: Record<string, typeof sprints> = {};
     for (const sprint of sprints) {
@@ -571,7 +571,7 @@ router.get('/:id', async (req, res) => {
     }
 
     const activeSprints = await prisma.sprint.findMany({
-      where: { projectZohoId: project.zohoId, status: 'active' },
+      where: { projectZohoId: project.zohoId, totalTickets: { not: 0 }, status: 'active' },
       orderBy: { createdAt: 'asc' },
     });
 

@@ -173,6 +173,227 @@ async function fetchSprintsForProject(teamId: string, projectZohoId: string): Pr
   return allSprints;
 }
 
+/**
+ * Fetches metadata for all completed (past) sprints for a project.
+ * Only fetches sprint names, dates, and IDs — no issues or burndown data.
+ * 
+ * **Endpoint**: GET /team/{teamId}/projects/{projectZohoId}/sprints/ with type=[3]
+ * 
+ * **Rate Limiting**: Uses dedicated throttle label 'pastSprints/{projectZohoId}'
+ * 
+ * **Return**: Array of sprint metadata objects (zohoId, name, dates, status).
+ */
+export async function fetchPastSprintNames(teamId: string, projectZohoId: string): Promise<SprintRaw[]> {
+  const token = getAccessToken();
+  const url = `${config.zoho.apiBaseUrl}/team/${teamId}/projects/${projectZohoId}/sprints/`;
+
+  let res;
+  try {
+    await zohoThrottle.wait(`pastSprints/${projectZohoId}`);
+    res = await axios.get(url, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      params: { action: 'data', type: '[3]', index: 1, range: 50 },
+    });
+    zohoThrottle.record(res.status);
+  } catch (err) {
+    zohoThrottle.recordError(axios.isAxiosError(err) ? err.response?.status : undefined);
+    return [];
+  }
+
+  const raw = res.data as Record<string, unknown>;
+  const sprintIds: string[] = (raw?.sprintIds as string[] | undefined) ?? [];
+  if (sprintIds.length === 0) return [];
+  const prop = (raw!.sprint_prop as Record<string, number>) ?? {};
+
+  const nameIdx = prop.sprintName ?? 0;
+  const startIdx = prop.startDate ?? 1;
+  const endIdx = prop.endDate ?? 2;
+
+  const allSprints: SprintRaw[] = [];
+  const sprintJObjData = raw!.sprintJObj as Record<string, unknown[]>;
+  for (const id of sprintIds) {
+    const f = sprintJObjData?.[id];
+    if (!f) continue;
+    allSprints.push({
+      zohoId:     id,
+      name:       String(f[nameIdx] ?? 'Sprint').trim(),
+      status:     'completed',
+      statusCode: 3,
+      startDate:  String(f[startIdx] ?? '-1') === '-1' ? null : String(f[startIdx]),
+      endDate:    String(f[endIdx] ?? '-1') === '-1' ? null : String(f[endIdx]),
+    });
+  }
+
+  return allSprints;
+}
+
+/**
+ * Fetches full data for a single past sprint and upserts it into the database.
+ * 
+ * This function:
+ * - Fetches sprint issue counts by status from Zoho
+ * - Upserts the sprint record into the Sprint table
+ * - Fetches and upserts all issues (NOT deleted like regular sync)
+ * - Records a burndown snapshot
+ * 
+ * **Rate Limiting**: Uses dedicated throttle labels for issues and burndown.
+ * 
+ * @param sprintMeta - Sprint metadata (zohoId, name, dates) from fetchPastSprintNames
+ * @param project - The project record (needed for statusMap and name)
+ * @returns The upserted sprint record from the database
+ */
+export async function fetchPastSprintData(teamId: string, projectZohoId: string, sprintMeta: SprintRaw): Promise<any> {
+  const project = await prisma.project.findUnique({ where: { zohoId: projectZohoId } });
+  if (!project?.statusMap) {
+    throw new Error(`No statusMap for project ${projectZohoId}`);
+  }
+
+  let statusNameMap: Record<string, string>;
+  let statusGroupMap: Record<string, string>;
+  try {
+    const parsed = JSON.parse(project.statusMap) as {
+      map: Record<string, string>;
+      statusGroups: Record<string, string>;
+    };
+    statusNameMap = parsed.map ?? {};
+    statusGroupMap = parsed.statusGroups ?? {};
+  } catch {
+    throw new Error(`Could not parse statusMap for project ${projectZohoId}`);
+  }
+
+  const { orderedNames, statusGroups } = await fetchStatusMap(teamId, projectZohoId);
+
+  const rawCounts = await fetchItemsForSprint(teamId, projectZohoId, sprintMeta.zohoId, statusNameMap);
+
+  const statusBreakdown: Record<string, number> = {};
+  for (const name of orderedNames) {
+    statusBreakdown[name] = rawCounts[name] ?? 0;
+  }
+  for (const [name, count] of Object.entries(rawCounts)) {
+    if (!(name in statusBreakdown)) statusBreakdown[name] = count;
+  }
+
+  const totalTickets = Object.values(statusBreakdown).reduce((a, b) => a + b, 0);
+
+  const sprint = await prisma.sprint.upsert({
+    where:  { zohoId: sprintMeta.zohoId },
+    update: {
+      projectZohoId: project.zohoId,
+      name: sprintMeta.name, status: sprintMeta.status,
+      startDate: sprintMeta.startDate, endDate: sprintMeta.endDate,
+      totalTickets,
+      statusBreakdown: JSON.stringify(statusBreakdown),
+      rawData: JSON.stringify({ sprint: sprintMeta, statusBreakdown, statusGroups }),
+      projectName: project.name,
+    },
+    create: {
+      zohoId: sprintMeta.zohoId, projectZohoId: project.zohoId,
+      projectName: project.name,
+      name: sprintMeta.name, status: sprintMeta.status,
+      startDate: sprintMeta.startDate, endDate: sprintMeta.endDate,
+      totalTickets,
+      statusBreakdown: JSON.stringify(statusBreakdown),
+      rawData: JSON.stringify({ sprint: sprintMeta, statusBreakdown, statusGroups }),
+    },
+  });
+
+  // Sync issues for past sprint (upsert, NOT delete like regular sync)
+  const token = getAccessToken();
+  const issueUrl = `${config.zoho.apiBaseUrl}/team/${teamId}/projects/${projectZohoId}/sprints/${sprintMeta.zohoId}/item/`;
+  let index = 1;
+  const RANGE = 100;
+
+  while (true) {
+    try {
+      await zohoThrottle.wait(`pastIssues/${sprintMeta.zohoId}/p${index}`);
+      const issueRes = await axios.get(issueUrl, {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+        params: { action: 'data', index, range: RANGE },
+      });
+      zohoThrottle.record(issueRes.status);
+
+      const issueRaw = issueRes.data as Record<string, unknown>;
+      const itemIds = (issueRaw.itemIds as string[] | undefined) ?? [];
+      const itemJObj = issueRaw.itemJObj as Record<string, unknown[]> | undefined;
+
+      if (!itemJObj || itemIds.length === 0) break;
+
+      const itemProp = (issueRaw.item_prop as Record<string, number> | undefined) ?? {};
+      const statusIdx = itemProp.statusId ?? itemProp.status ?? itemProp.itemStatus ?? -1;
+      const itemNoIdx = itemProp.itemNo ?? 1;
+      const titleIdx = itemProp.itemName ?? itemProp.name ?? 0;
+      const epicIdIdx = itemProp.epicId ?? -1;
+      const creatorIdx = itemProp.createdBy ?? itemProp.creatorId ?? itemProp.creator ?? itemProp.log_by ?? -1;
+      const assigneeIdx = itemProp.ownerId ?? itemProp.owners ?? itemProp.assigneeId ?? itemProp.assignee ?? itemProp.owner ?? -1;
+      const createdIdx = itemProp.createdTime ?? itemProp.createdOn ?? -1;
+      const targetDateIdx = itemProp.endDate ?? itemProp.targetDate ?? -1;
+
+      for (const itemId of itemIds) {
+        const f = itemJObj[itemId];
+        if (!f || !Array.isArray(f)) continue;
+
+        const statusId = String(f[statusIdx] ?? '').trim();
+        const statusName = statusNameMap[statusId] ?? statusId;
+        const statusGroup = (statusGroupMap[statusName] as 'todo' | 'doing' | 'done') ?? 'todo';
+
+        const itemNo = String(f[itemNoIdx] ?? '').trim();
+        const title = String(f[titleIdx] ?? 'Untitled').trim();
+        const epicZohoId = epicIdIdx >= 0 ? String(f[epicIdIdx] ?? '').trim() || undefined : undefined;
+        const creatorZohoId = creatorIdx >= 0 ? String(f[creatorIdx] ?? '').trim() || undefined : undefined;
+
+        let assigneeIds: string[] = [];
+        if (assigneeIdx >= 0) {
+          const assigneeVal = f[assigneeIdx];
+          if (Array.isArray(assigneeVal)) {
+            assigneeIds = assigneeVal.map(a => String(a).trim()).filter(a => a && a !== '-1');
+          } else if (typeof assigneeVal === 'string') {
+            const trimmed = assigneeVal.trim();
+            if (trimmed && trimmed !== '-1') {
+              assigneeIds = trimmed.split(',').map(s => s.trim()).filter(s => s && s !== '-1');
+            }
+          }
+        }
+
+        const createdAt = createdIdx >= 0 ? String(f[createdIdx] ?? '').trim() || undefined : undefined;
+        const endDate = targetDateIdx >= 0 ? String(f[targetDateIdx] ?? '').trim() || undefined : undefined;
+
+        await prisma.issue.upsert({
+          where: { zohoId: itemId },
+          update: {
+            sprintZohoId: sprintMeta.zohoId,
+            projectZohoId,
+            itemNo, title, status: statusName, statusGroup,
+            epicZohoId, creatorZohoId,
+            assigneeIds: JSON.stringify(assigneeIds),
+            createdAt, endDate, syncedAt: new Date(),
+          },
+          create: {
+            zohoId: itemId, sprintZohoId: sprintMeta.zohoId, projectZohoId,
+            itemNo, title, status: statusName, statusGroup,
+            epicZohoId, creatorZohoId,
+            assigneeIds: JSON.stringify(assigneeIds),
+            createdAt, endDate,
+          },
+        });
+      }
+
+      if (itemIds.length < RANGE) break;
+      index += RANGE;
+    } catch (err) {
+      zohoThrottle.recordError(axios.isAxiosError(err) ? err.response?.status : undefined);
+      break;
+    }
+  }
+
+  // Record burndown snapshot
+  const doneCount = Object.entries(statusBreakdown)
+    .filter(([name]) => (statusGroups[name] as string) === 'done' || statusGroups[name] === 'done')
+    .reduce((sum, [, n]) => sum + n, 0);
+  await recordBurndownSnapshot(sprintMeta.zohoId, doneCount, totalTickets);
+
+  return sprint;
+}
+
 // ── Ticket / item fetching ────────────────────────────────────────────────────
 
 /**
@@ -1000,6 +1221,16 @@ export async function syncAll(): Promise<number> {
       }
 
       const sprints = await fetchSprintsForProject(teamId, project.zohoId);
+      const activeSprintIds = new Set(sprints.map(s => s.zohoId));
+      const staleSprints = await prisma.sprint.findMany({
+        where: { projectZohoId: project.zohoId },
+        select: { zohoId: true },
+      });
+      for (const stale of staleSprints) {
+        if (!activeSprintIds.has(stale.zohoId)) {
+          await prisma.sprint.delete({ where: { zohoId: stale.zohoId } });
+        }
+      }
       if (sprints.length === 0) continue;
 
       let lastSprintBreakdown: Record<string, number> | null = null;

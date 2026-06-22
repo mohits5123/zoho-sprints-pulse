@@ -478,6 +478,51 @@ export async function syncSprints(): Promise<{ synced: number; sprints: SprintSn
 }
 
 /**
+ * Sprint metadata — lightweight info returned when listing past sprints.
+ */
+export interface PastSprintName {
+  zohoId: string;
+  name: string;
+  status: string;
+  statusCode: number;
+  startDate: string | null;
+  endDate: string | null;
+}
+
+/**
+ * Fetch names of past (completed) sprints for a project.
+ *
+ * @param projectZohoId - The Zoho ID of the project.
+ *
+ * @returns Array of past sprint metadata (names, dates, IDs).
+ *
+ * @remarks
+ * Lightweight call — only returns sprint identifiers, no issues or burndown data.
+ * Use fetchPastSprintData() to fetch full data for a specific sprint.
+ */
+export async function fetchPastSprintNames(projectZohoId: string): Promise<{ sprints: PastSprintName[] }> {
+  const res = await apiClient.post<{ sprints: PastSprintName[] }>('/sprints/fetch-past', { projectZohoId });
+  return res.data;
+}
+
+/**
+ * Fetch full data for a single past sprint from Zoho Sprints.
+ *
+ * @param projectZohoId - The Zoho ID of the project.
+ * @param sprintZohoId - The Zoho ID of the past sprint to fetch.
+ *
+ * @returns The fully synced sprint snapshot with issues and burndown data.
+ *
+ * @remarks
+ * This fetches issues and burndown data for the specified sprint.
+ * Issues are upserted (not deleted) so they remain queryable.
+ */
+export async function fetchPastSprintData(projectZohoId: string, sprintZohoId: string): Promise<{ sprint: SprintSnapshot }> {
+  const res = await apiClient.post<{ sprint: SprintSnapshot }>('/sprints/fetch-past', { projectZohoId, sprintZohoId });
+  return res.data;
+}
+
+/**
  * Fetch application configuration.
  *
  * @returns Workspace name configured for the dashboard.

@@ -39,3 +39,4 @@ document.sh
 review.sh
 staged-review-report.txt
 
+plan/*

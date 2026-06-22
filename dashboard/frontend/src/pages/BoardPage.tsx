@@ -28,7 +28,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { fetchProject, fetchSprintEpics, fetchSyncStatus, fetchKanbanStaleCount, type EpicBreakdown, type Project, type SprintSnapshot } from '../api/client';
+import { fetchProject, fetchSprintEpics, fetchSyncStatus, fetchKanbanStaleCount, fetchPastSprintData, type EpicBreakdown, type Project, type SprintSnapshot } from '../api/client';
 import { SprintCard } from '../components/SprintCard';
 import { EpicCard } from '../components/EpicCard';
 import { SprintProgressCard } from '../components/SprintProgressCard';
@@ -99,7 +99,7 @@ export function BoardPage() {
   useEffect(() => {
     if (!projectId) return;
     fetchProject(projectId)
-      .then(({ project: p }) => {
+      .then(async ({ project: p }) => {
         setProject(p);
         // Load stale config — statusGroups will be refined once epics load, pre-load with empty map
         setStaleConfig(loadStaleConfig(projectId, {}));
@@ -107,6 +107,14 @@ export function BoardPage() {
         if (sprintIdParam) {
           const match = p.activeSprints.find((s) => s.zohoId === sprintIdParam);
           if (match) { setSelectedSprint(match); return; }
+          // Not in active sprints — try fetching as a past sprint
+          try {
+            const { sprint } = await fetchPastSprintData(projectId, sprintIdParam);
+            setSelectedSprint(sprint);
+            return;
+          } catch {
+            // Sprint not found — fall through to auto-select
+          }
         }
         // Auto-select if there's exactly one sprint (or it's kanban)
         if (p.boardType === 'kanban') {
