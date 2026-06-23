@@ -1224,11 +1224,32 @@ export async function syncAll(): Promise<number> {
       const activeSprintIds = new Set(sprints.map(s => s.zohoId));
       const staleSprints = await prisma.sprint.findMany({
         where: { projectZohoId: project.zohoId },
-        select: { zohoId: true },
+        select: { zohoId: true, status: true, endDate: true },
       });
+      const now = new Date();
       for (const stale of staleSprints) {
         if (!activeSprintIds.has(stale.zohoId)) {
-          await prisma.sprint.delete({ where: { zohoId: stale.zohoId } });
+          if (stale.status === 'completed') {
+            // Keep completed sprints — they're preserved for historical view
+            continue;
+          }
+          // If sprint ended but Zoho no longer returns it as active, mark it completed
+          if (stale.endDate && new Date(stale.endDate) < now && stale.status === 'active') {
+            await prisma.sprint.update({
+              where: { zohoId: stale.zohoId },
+              data: { status: 'completed' },
+            });
+          } else if (stale.status === 'active') {
+            // Sprint is active locally but gone from Zoho and hasn't ended yet
+            // Mark it completed to preserve its issues rather than deleting
+            await prisma.sprint.update({
+              where: { zohoId: stale.zohoId },
+              data: { status: 'completed' },
+            });
+          } else {
+            // Truly stale sprint (e.g., future/planned) — delete it
+            await prisma.sprint.delete({ where: { zohoId: stale.zohoId } });
+          }
         }
       }
       if (sprints.length === 0) continue;
@@ -1281,6 +1302,40 @@ export async function syncAll(): Promise<number> {
 
         lastSprintBreakdown = statusBreakdown;
         synced++;
+      }
+
+      // Final sync: refresh completed sprints one last time to capture any
+      // issues that may have been moved out before the sprint was closed
+      const completedSprints = await prisma.sprint.findMany({
+        where: { projectZohoId: project.zohoId, status: 'completed' },
+        select: { zohoId: true },
+      });
+      for (const completed of completedSprints) {
+        try {
+          const rawCounts = await fetchItemsForSprint(teamId, project.zohoId, completed.zohoId, statusMap);
+          const statusBreakdown: Record<string, number> = {};
+          for (const name of orderedNames) {
+            statusBreakdown[name] = rawCounts[name] ?? 0;
+          }
+          for (const [name, count] of Object.entries(rawCounts)) {
+            if (!(name in statusBreakdown)) statusBreakdown[name] = count;
+          }
+          const totalTickets = Object.values(statusBreakdown).reduce((a, b) => a + b, 0);
+          await prisma.sprint.update({
+            where: { zohoId: completed.zohoId },
+            data: {
+              totalTickets,
+              statusBreakdown: JSON.stringify(statusBreakdown),
+            },
+          });
+          await syncIssues(teamId, project.zohoId, completed.zohoId, 'completed');
+          const doneCount = Object.entries(statusBreakdown)
+            .filter(([name]) => statusGroups[name] === 'done')
+            .reduce((sum, [, n]) => sum + n, 0);
+          await recordBurndownSnapshot(completed.zohoId, doneCount, totalTickets);
+        } catch (err) {
+          console.error(`  ❌ Failed to sync completed sprint ${completed.zohoId}:`, err instanceof Error ? err.message : err);
+        }
       }
 
       // Persist project-level status breakdown and groups for analytics queries
@@ -1378,15 +1433,20 @@ export async function syncAll(): Promise<number> {
           },
         });
       } else {
-        // No kanban board found — clean up any stale sprint records for this project
-        await prisma.sprint.deleteMany({
+        // No kanban board found — clean up any stale kanban sprint records
+        // but preserve completed sprints
+        const kanbanSprints = await prisma.sprint.findMany({
           where: {
             projectZohoId: project.zohoId,
             rawData: {
               contains: JSON.stringify({ sprint: { statusCode: 7 } }),
             },
           },
+          select: { zohoId: true },
         });
+        for (const kanbanSprint of kanbanSprints) {
+          await prisma.sprint.delete({ where: { zohoId: kanbanSprint.zohoId } });
+        }
       }
 
       // Build full ordered breakdown (all statuses, zero-filled for missing ones)

@@ -1,7 +1,7 @@
 /**
  * Projects page component.
  *
- * Displays all projects (pods) from Zoho Sprints with their board type (scrum/kanban/other),
+ * Displays all projects from Zoho Sprints with their board type (scrum/kanban/other),
  * active sprints, and board item counts for kanban boards. Supports drag-and-drop reordering
  * and hiding/unhiding projects.
  *
@@ -191,7 +191,7 @@ function ProjectCard({
                   style={s.dropdownItem}
                   onClick={() => { setMenuOpen(false); onHide(project.zohoId); }}
                 >
-                  🙈 Hide pod
+                  🙈 Hide project
                 </button>
               </div>
             )}
@@ -399,7 +399,7 @@ export function Projects() {
         <div style={s.headerLeft}>
           <button style={s.back} onClick={() => navigate('/')}>← Back</button>
           <div>
-            <h1 style={s.title}>🗂 Pods</h1>
+            <h1 style={s.title}>🗂 Projects</h1>
             <p style={s.subtitle}>{projects.length} projects synced from Zoho Sprints</p>
           </div>
         </div>
@@ -409,9 +409,9 @@ export function Projects() {
       </header>
 
       {error && <p style={s.errorText}>{error}</p>}
-      {loading && <p style={s.muted}>Loading pods…</p>}
+      {loading && <p style={s.muted}>Loading projects…</p>}
       {!loading && projects.length === 0 && (
-        <p style={s.muted}>No pods found. Go back and sync from the dashboard.</p>
+        <p style={s.muted}>No projects found. Go back and sync from the dashboard.</p>
       )}
 
       {!loading && visible.length > 0 && (
@@ -445,7 +445,7 @@ export function Projects() {
       {!loading && hidden.length > 0 && (
         <div style={s.hiddenSection}>
           <button style={s.hiddenToggle} onClick={() => setHiddenOpen((o) => !o)}>
-            {hiddenOpen ? '▾' : '▸'} Hidden pods ({hidden.length})
+            {hiddenOpen ? '▾' : '▸'} Hidden projects ({hidden.length})
           </button>
           {hiddenOpen && (
             <div style={s.grid}>

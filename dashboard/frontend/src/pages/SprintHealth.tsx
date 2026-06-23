@@ -1,5 +1,5 @@
 /**
- * Sprint Health page component.
+ * Sprints page component.
  *
  * Displays a grid of sprint cards showing active sprint status for all scrum projects.
  * Each card shows sprint name, status, and ticket counts by status group (todo/doing/done).
@@ -156,7 +156,7 @@ export function SprintHealth() {
         <div style={s.headerLeft}>
           <button style={s.back} onClick={() => navigate('/')}>← Back</button>
           <div>
-            <h1 style={s.title}>🏃 Sprint Health</h1>
+            <h1 style={s.title}>🏃 Sprints</h1>
             <p style={s.subtitle}>
               {sprints.length > 0
                 ? `${sprints.length} scrum project${sprints.length !== 1 ? 's' : ''} · latest sprint data`

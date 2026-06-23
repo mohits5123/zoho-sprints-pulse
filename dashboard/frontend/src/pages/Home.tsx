@@ -3,12 +3,12 @@
  *
  * Landing page showing connection status, sync controls, and quick navigation to main sections:
  * - Team: View all team members (synced from Zoho)
- * - Pods: View all projects (synced from Zoho)
- * - Sprint Health: View active sprint status (synced from Zoho)
+ * - Projects: View all projects (synced from Zoho)
+ * - Sprints: View active sprint status (synced from Zoho)
  * - Zoho Connection: Display connection details and token expiry
  *
  * Features:
- * - 3-column card grid for Team, Pods, and Sprint Health
+ * - 3-column card grid for Team, Projects, and Sprints
  * - Each card shows count of synced items and resync button
  * - Clickable cards navigate to respective pages (when data synced)
  * - Independent sync buttons for each section
@@ -153,15 +153,15 @@ export function Home() {
             )}
           </div>
 
-          {/* Pods card */}
+          {/* Projects card */}
           <div
             style={{ ...s.card, cursor: projSynced ? 'pointer' : 'default', borderColor: projSynced ? '#8b5cf644' : '#334155' }}
             onClick={projSynced ? () => navigate('/projects') : undefined}
           >
             <div style={s.cardHeader}>
               <div>
-                <h2 style={s.cardTitle}>🗂 Pods</h2>
-                {projSynced && <p style={s.cardHint}>Click to view all pods →</p>}
+                <h2 style={s.cardTitle}>🗂 Projects</h2>
+                {projSynced && <p style={s.cardHint}>Click to view all projects →</p>}
               </div>
               {projSynced && (
                 <button style={s.resyncBtn} onClick={handleSyncProjects} disabled={syncingProjects}>
@@ -172,19 +172,19 @@ export function Home() {
             {projectCount === null && <p style={s.muted}>Checking local database…</p>}
             {projectCount === 0 && !syncingProjects && (
               <>
-                <p style={s.syncPrompt}>No pods synced yet.</p>
+                <p style={s.syncPrompt}>No projects synced yet.</p>
                 <p style={s.muted}>Sync your Zoho Sprints projects to get started.</p>
                 {projectSyncError && <p style={s.errorText}>{projectSyncError}</p>}
                 <button style={{ ...s.syncBtn, backgroundColor: '#8b5cf6' }} onClick={handleSyncProjects}>
-                  Sync Pods
+                  Sync Projects
                 </button>
               </>
             )}
-            {projectCount === 0 && syncingProjects && <p style={s.muted}>Syncing pods from Zoho…</p>}
+            {projectCount === 0 && syncingProjects && <p style={s.muted}>Syncing projects from Zoho…</p>}
             {projSynced && (
               <div style={s.countRow}>
                 <span style={{ ...s.count, color: '#8b5cf6' }}>{projectCount}</span>
-                <span style={s.countLabel}>pods synced</span>
+                <span style={s.countLabel}>projects synced</span>
                 {projectSyncError && <span style={{ ...s.errorText, marginLeft: 12 }}>{projectSyncError}</span>}
               </div>
             )}
@@ -197,7 +197,7 @@ export function Home() {
           >
             <div style={s.cardHeader}>
               <div>
-                <h2 style={s.cardTitle}>🏃 Sprint Health</h2>
+                <h2 style={s.cardTitle}>🏃 Sprints</h2>
                 {sprintsSynced && <p style={s.cardHint}>Click to view all sprints →</p>}
               </div>
               {sprintsSynced && (
@@ -210,7 +210,7 @@ export function Home() {
             {sprintCount === 0 && !syncingSprints && (
               <>
                 <p style={s.syncPrompt}>No sprint data yet.</p>
-                <p style={s.muted}>Sync pods first, then set board types.</p>
+                <p style={s.muted}>Sync projects first, then set board types.</p>
                 {sprintSyncError && <p style={s.errorText}>{sprintSyncError}</p>}
                 <button style={{ ...s.syncBtn, backgroundColor: '#22c55e' }} onClick={handleSyncSprints}>
                   Sync Sprints
