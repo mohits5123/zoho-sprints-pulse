@@ -97,7 +97,7 @@ export function BacklogPage() {
     <div style={s.page}>
       <header style={s.header}>
         <div style={s.headerLeft}>
-          <button style={s.back} onClick={() => navigate(`/board/${projectId}`)}>← Back</button>
+          <button style={s.back} onClick={() => navigate('/projects')}>← Back</button>
           <div>
             <h1 style={s.title}>
               {project.name} — Backlog

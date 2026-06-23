@@ -169,7 +169,7 @@ export function BoardPage() {
     <div style={s.page}>
       <header style={s.header}>
         <div style={s.headerLeft}>
-          <button style={s.back} onClick={() => navigate('/projects')}>← Back</button>
+          <button style={s.back} onClick={() => navigate(searchParams.has('sprintId') ? '/sprints' : '/projects')}>← Back</button>
           <div>
             <h1 style={s.title}>{project?.name ?? '…'}</h1>
             <p style={s.subtitle}>
