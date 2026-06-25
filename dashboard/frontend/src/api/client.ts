@@ -274,6 +274,7 @@ export interface SprintSnapshot {
   totalTickets: number;
   statusBreakdown: string | null; // JSON string
   rawData: string | null;         // JSON string, contains statusGroups
+  hidden: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -475,6 +476,19 @@ export async function fetchSprints(): Promise<{ sprints: SprintSnapshot[]; total
 export async function syncSprints(): Promise<{ synced: number; sprints: SprintSnapshot[] }> {
   const res = await apiClient.post<{ synced: number; sprints: SprintSnapshot[] }>('/sprints/sync');
   return res.data;
+}
+
+/**
+ * Update sprint display settings (hidden status).
+ *
+ * @param id - The unique identifier of the sprint.
+ * @param data - Object containing `hidden` (boolean).
+ *
+ * @returns Updated SprintSnapshot with the new display settings.
+ */
+export async function updateSprintDisplay(id: string, data: { hidden: boolean }): Promise<SprintSnapshot> {
+  const res = await apiClient.patch<{ sprint: SprintSnapshot }>(`/sprints/${id}/display`, data);
+  return res.data.sprint;
 }
 
 /**

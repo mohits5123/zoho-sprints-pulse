@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { SprintSnapshot } from '../api/client';
 import { UserAvatar, sortByRole, sortStatusEntries } from './UserAvatar';
 
@@ -52,6 +52,8 @@ interface SprintCardProps {
   onUserClick?: (userId: string, userName: string) => void;
   /** Callback when the card is clicked (optional) */
   onSprintClick?: () => void;
+  /** Callback when hide is triggered (optional) */
+  onHide?: () => void;
 }
 
 /**
@@ -59,7 +61,10 @@ interface SprintCardProps {
  * Shows sprint name, dates, total tickets, progress bar, and detailed status rows
  * Includes stale ticket warnings and user avatars for assigned team members
  */
-export function SprintCard({ sprint, hideProjectName, staleCount, onStatusClick, onStaleClick, users, onUserClick, onSprintClick }: SprintCardProps) {
+export function SprintCard({ sprint, hideProjectName, staleCount, onStatusClick, onStaleClick, users, onUserClick, onSprintClick, onHide }: SprintCardProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
   const breakdown    = parseBreakdown(sprint.statusBreakdown);
   const statusGroups = parseStatusGroups(sprint.rawData);
   const rawEntries   = Object.entries(breakdown);
@@ -104,6 +109,27 @@ export function SprintCard({ sprint, hideProjectName, staleCount, onStatusClick,
           <span style={{ ...s.statusPill, color: sprintStatusColor, borderColor: `${sprintStatusColor}44`, backgroundColor: `${sprintStatusColor}11` }}>
             {sprint.status}
           </span>
+          {onHide && (
+            <div ref={menuRef} style={{ position: 'relative' }}>
+              <button
+                style={s.menuBtn}
+                onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}
+                title="More options"
+              >
+                ⋮
+              </button>
+              {menuOpen && (
+                <div style={s.dropdown}>
+                  <button
+                    style={s.dropdownItem}
+                    onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onHide(); }}
+                  >
+                    Hide sprint
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -238,6 +264,25 @@ const s: Record<string, React.CSSProperties> = {
     fontSize: 10, fontWeight: 700, textTransform: 'uppercase' as const,
     letterSpacing: '0.06em', padding: '3px 8px',
     borderRadius: 20, border: '1px solid', flexShrink: 0,
+  },
+  /** More options menu button */
+  menuBtn: {
+    backgroundColor: 'transparent', border: 'none',
+    color: '#64748b', fontSize: 14, cursor: 'pointer',
+    padding: '2px 4px', borderRadius: 4, lineHeight: 1,
+  },
+  /** Dropdown menu container */
+  dropdown: {
+    position: 'absolute', top: '100%', right: 0,
+    backgroundColor: '#1e293b', border: '1px solid #334155',
+    borderRadius: 8, padding: '4px 0', minWidth: 140,
+    zIndex: 100, boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+  },
+  /** Dropdown menu item */
+  dropdownItem: {
+    width: '100%', padding: '8px 16px', backgroundColor: 'transparent',
+    border: 'none', color: '#e2e8f0', fontSize: 13, cursor: 'pointer',
+    textAlign: 'left' as const,
   },
   /** Sprint date range display */
   dates: { margin: 0, fontSize: 12, color: '#64748b' },

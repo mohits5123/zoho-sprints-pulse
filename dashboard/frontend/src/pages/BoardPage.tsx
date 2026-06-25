@@ -52,17 +52,18 @@ function buildKanbanSprint(project: Project): SprintSnapshot {
   const breakdown = project.statusBreakdown ? JSON.parse(project.statusBreakdown) as Record<string, number> : {};
   const groups    = project.statusGroups    ? JSON.parse(project.statusGroups)    as Record<string, string>  : {};
   const total     = Object.values(breakdown).reduce((s, n) => s + n, 0);
-  return {
+ return {
     zohoId:          'kanban-board',
     projectZohoId:   project.zohoId,
     projectName:     project.name,
     name:            'Kanban Board',
     status:          'active',
     startDate:       null,
-    endDate:         null,
+    endDate:       null,
     totalTickets:    total,
     statusBreakdown: project.statusBreakdown,
     rawData:         JSON.stringify({ statusGroups: groups }),
+    hidden:          false,
     createdAt:       project.createdAt,
     updatedAt:       project.updatedAt,
   };

@@ -10,6 +10,7 @@
  * - Auto-refresh: polls every 5s after sync until lastSyncedAt changes
  * - Empty state with sync prompt if no sprint data available
  * - Back navigation to dashboard
+ * - Hide/unhide sprints (local UI preference, persists across syncs)
  *
  * Data flows:
  * - Sprint data fetched from local SQLite (served by backend)
@@ -17,7 +18,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchSprints, syncSprints, fetchSyncStatus, fetchPastSprintNames, fetchPastSprintData, fetchProjects, SprintSnapshot, Project, PastSprintName } from '../api/client';
+import { fetchSprints, syncSprints, fetchSyncStatus, fetchPastSprintNames, fetchPastSprintData, fetchProjects, SprintSnapshot, Project, PastSprintName, updateSprintDisplay } from '../api/client';
 import { SprintCard } from '../components/SprintCard';
 import { LastSyncedFooter } from '../components/LastSyncedFooter';
 
@@ -40,6 +41,7 @@ export function SprintHealth() {
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [loadingPast, setLoadingPast] = useState(false);
   const [fetchingPast, setFetchingPast] = useState(false);
+  const [hiddenOpen, setHiddenOpen] = useState(false);
 
   function formatDate(dateStr: string | null): string {
     if (!dateStr) return 'No date';
@@ -56,6 +58,20 @@ export function SprintHealth() {
     fetchSyncStatus().then(({ lastSyncedAt: ts }) => setLastSyncedAt(ts)).catch(() => {});
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
+
+  async function handleHide(id: string) {
+    setSprints((prev) => prev.map((sp) => sp.zohoId === id ? { ...sp, hidden: true } : sp));
+    await updateSprintDisplay(id, { hidden: true }).catch(() => {
+      setSprints((prev) => prev.map((sp) => sp.zohoId === id ? { ...sp, hidden: false } : sp));
+    });
+  }
+
+  async function handleUnhide(id: string) {
+    setSprints((prev) => prev.map((sp) => sp.zohoId === id ? { ...sp, hidden: false } : sp));
+    await updateSprintDisplay(id, { hidden: false }).catch(() => {
+      setSprints((prev) => prev.map((sp) => sp.zohoId === id ? { ...sp, hidden: true } : sp));
+    });
+  }
 
   async function handleLoadPast() {
     setShowPastModal(true);
@@ -125,9 +141,7 @@ export function SprintHealth() {
     setError(null);
     const prevSyncedAt = lastSyncedAt;
     try {
-      // Sync starts in background on server — returns immediately
       await syncSprints();
-      // Poll every 5s until lastSyncedAt changes, then re-fetch sprints
       pollRef.current = setInterval(async () => {
         try {
           const { lastSyncedAt: ts } = await fetchSyncStatus();
@@ -147,8 +161,12 @@ export function SprintHealth() {
     }
   }
 
-  const activeSprints = sprints.filter(sp => sp.status === 'active');
-  const pastSprints = sprints.filter(sp => sp.status !== 'active');
+  const visibleSprints = sprints.filter(sp => !sp.hidden);
+  const hiddenSprints = sprints.filter(sp => sp.hidden);
+  const activeSprints = visibleSprints.filter(sp => sp.status === 'active');
+  const pastSprints = visibleSprints.filter(sp => sp.status !== 'active');
+
+  const visibleCount = visibleSprints.length;
 
   return (
     <div style={s.page}>
@@ -158,8 +176,8 @@ export function SprintHealth() {
           <div>
             <h1 style={s.title}>🏃 Sprints</h1>
             <p style={s.subtitle}>
-              {sprints.length > 0
-                ? `${sprints.length} scrum project${sprints.length !== 1 ? 's' : ''} · latest sprint data`
+              {visibleCount > 0
+                ? `${visibleCount} visible sprint${visibleCount !== 1 ? 's' : ''}${hiddenSprints.length > 0 ? ` · ${hiddenSprints.length} hidden` : ''}`
                 : 'Current sprint status for all scrum projects'}
             </p>
           </div>
@@ -193,7 +211,14 @@ export function SprintHealth() {
             <>
               <div style={s.sectionHeader}>Active Sprints</div>
               <div style={s.grid}>
-                {activeSprints.map((sp) => <SprintCard key={sp.zohoId} sprint={sp} onSprintClick={() => onSprintClick(sp.projectZohoId, sp.zohoId)} />)}
+                {activeSprints.map((sp) => (
+                  <SprintCard
+                    key={sp.zohoId}
+                    sprint={sp}
+                    onSprintClick={() => onSprintClick(sp.projectZohoId, sp.zohoId)}
+                    onHide={() => handleHide(sp.zohoId)}
+                  />
+                ))}
               </div>
             </>
           )}
@@ -204,7 +229,39 @@ export function SprintHealth() {
             <>
               <div style={s.sectionHeader}>Past Sprints</div>
               <div style={s.grid}>
-                {pastSprints.map((sp) => <SprintCard key={sp.zohoId} sprint={sp} onSprintClick={() => onSprintClick(sp.projectZohoId, sp.zohoId)} />)}
+                {pastSprints.map((sp) => (
+                  <SprintCard
+                    key={sp.zohoId}
+                    sprint={sp}
+                    onSprintClick={() => onSprintClick(sp.projectZohoId, sp.zohoId)}
+                    onHide={() => handleHide(sp.zohoId)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+          {hiddenSprints.length > 0 && (
+            <>
+              <hr style={s.divider} />
+              <div style={s.hiddenSection}>
+                <button style={s.hiddenToggle} onClick={() => setHiddenOpen((o) => !o)}>
+                  {hiddenOpen ? '▾' : '▸'} Hidden sprints ({hiddenSprints.length})
+                </button>
+                {hiddenOpen && (
+                  <div style={s.grid}>
+                    {hiddenSprints.map((sp) => (
+                      <div key={sp.zohoId} style={s.hiddenCard}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
+                          <div style={{ ...s.avatarSm, backgroundColor: avatarColor(sp.name) }}>
+                            {initials(sp.name)}
+                          </div>
+                          <span style={s.hiddenName}>{sp.name}</span>
+                        </div>
+                        <button style={s.unhideBtn} onClick={() => handleUnhide(sp.zohoId)}>Show</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -286,6 +343,24 @@ export function SprintHealth() {
   );
 }
 
+function avatarColor(name: string): string {
+  const colors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#06b6d4', '#ef4444', '#6366f1'];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function initials(name: string): string {
+  return name
+    .split(' ')
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+}
+
 const s: Record<string, React.CSSProperties> = {
   page: {
     minHeight: '100vh',
@@ -335,6 +410,27 @@ const s: Record<string, React.CSSProperties> = {
   errorText: { color: '#fca5a5', fontSize: 14, marginBottom: 16 },
   sectionHeader: { fontSize: 18, fontWeight: 600, color: '#94a3b8', marginTop: 32, marginBottom: 16 },
   divider: { border: 'none', borderTop: '1px solid #1e293b', margin: '32px 0', },
+  hiddenSection: { marginTop: 32 },
+  hiddenToggle: {
+    backgroundColor: 'transparent', border: 'none',
+    color: '#64748b', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+    padding: '8px 0',
+  },
+  hiddenCard: {
+    backgroundColor: '#1e293b', border: '1px solid #334155',
+    borderRadius: 12, padding: '14px 18px',
+    display: 'flex', alignItems: 'center', gap: 12,
+  },
+  avatarSm: {
+    width: 32, height: 32, borderRadius: '50%',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 12, fontWeight: 700, color: '#fff', flexShrink: 0,
+  },
+  hiddenName: { color: '#64748b', fontSize: 13, fontWeight: 500 },
+  unhideBtn: {
+    padding: '5px 14px', backgroundColor: '#3b82f6', color: '#fff',
+    border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+  },
   modalOverlay: {
     position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',

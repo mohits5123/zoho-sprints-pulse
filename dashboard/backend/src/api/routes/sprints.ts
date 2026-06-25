@@ -312,4 +312,35 @@ router.post('/fetch-past', async (req, res) => {
   }
 });
 
+/**
+ * PATCH /api/sprints/:id/display — Toggle hidden for a sprint.
+ * @route PATCH /api/sprints/:id/display
+ * @method PATCH
+ * @param {string} id - Sprint's zohoId (primary key)
+ * @body {Object} body: { hidden: boolean }
+ * @returns {Object} - Updated sprint object
+ *   { sprint: Sprint }
+ * @notes
+ *   - hidden flag determines if sprint appears in the sprint health view
+ *   - This field is NOT synced from Zoho and persists across syncs
+ * @errors 500 - Database error
+ * @auth Required (OAuth token validation)
+ */
+router.patch('/:id/display', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { hidden } = req.body as { hidden?: boolean };
+
+    const data: { hidden?: boolean } = {};
+    if (hidden !== undefined) data.hidden = hidden;
+
+    const sprint = await prisma.sprint.update({ where: { zohoId: id }, data });
+    res.json({ sprint });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('❌ Display settings update failed:', msg);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
+  }
+});
+
 export default router;
