@@ -45,11 +45,11 @@ async function bootstrap(): Promise<void> {
     console.log(`🌐 API server running at http://localhost:${config.port}`);
     console.log(`   Health: http://localhost:${config.port}/api/health`);
     console.log(`   Status: http://localhost:${config.port}/api/status`);
-    console.log(`   Auto-sync: every 3 hours (cron: '0 */3 * * *')`);
+    console.log(`   Auto-sync: every hour (cron: '0 * * * *')`);
 
-    // Scheduled sync — every 3 hours
+    // Scheduled sync — every hour
     // Rate limiter inside syncAll ensures ≤25 Zoho req/min, so no API lockouts
-    cron.schedule('0 */3 * * *', () => {
+    cron.schedule('0 * * * *', () => {
       console.log('⏰ Scheduled sync triggered by cron');
       runFullSync().catch(console.error);
     });
