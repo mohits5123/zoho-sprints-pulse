@@ -62,6 +62,8 @@ export function Users() {
   const [loading, setLoading]       = useState(true);
   const [loadFetching, setLoadFetching] = useState(true);
 
+  // Fetch users from Zoho and sort them by role order (DEV → QA → PROD → OTHER).
+  // This runs once on mount.
   useEffect(() => {
     fetchUsers()
       .then((data) => {
@@ -73,6 +75,8 @@ export function Users() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Fetch team load data (WIP and stale counts) from the local SQLite DB.
+  // Silently degrades on failure — badges simply won't display.
   useEffect(() => {
     setLoadFetching(true);
     fetchTeamLoad()
@@ -88,6 +92,8 @@ export function Users() {
    * Counts of users per role.
    * Used for the role distribution stats in the header.
    * Computed from the local user list (not from Zoho).
+   *
+   * Result shape: `{ DEV: 5, QA: 3, PROD: 1, OTHER: 2 }` (only roles with users).
    */
   const roleCounts = users.reduce<Record<string, number>>((acc, u) => {
     acc[u.role] = (acc[u.role] ?? 0) + 1;
@@ -102,6 +108,8 @@ export function Users() {
    *
    * Note: This aggregates WIP per role, not per user.
    * The per-user WIP is shown on individual user cards.
+   *
+   * Result shape: `{ DEV: 12, QA: 5, PROD: 0, OTHER: 3 }` (only roles with WIP).
    */
   const roleWip = users.reduce<Record<string, number>>((acc, u) => {
     const stat = loadMap.get(u.zohoId);
@@ -121,7 +129,7 @@ export function Users() {
    * The change is persisted to the DB on the next sync.
    *
    * @param id - The user's local ID (not Zoho ID)
-   * @param newRole - The new role to assign
+   * @param newRole - The new role to assign (DEV/QA/PROD/OTHER)
    */
   function handleRoleChange(id: string, newRole: UserRole) {
     setUsers((prev) => prev.map((u) => (u.zohoId === id ? { ...u, role: newRole } : u)));
@@ -188,15 +196,19 @@ export function Users() {
       )}
 
       <main style={s.main}>
+        {/* Loading state — shown while fetchUsers is pending. */}
         {loading && <p style={s.muted}>Loading users…</p>}
 
+        {/* Empty state — users loaded but none exist (no sync yet). */}
         {!loading && users.length === 0 && (
           <p style={s.muted}>No users found. Go back and sync your team first.</p>
         )}
 
+        {/* User cards grid — each card shows avatar, name, role badge, WIP, and stale count. */}
         {!loading && users.length > 0 && (
           <div style={s.grid}>
             {users.map((user) => {
+              // Look up per-user stats from local team load data.
               const stat = loadMap.get(user.zohoId);
               return (
                 <UserCard
@@ -217,13 +229,10 @@ export function Users() {
 }
 
 /**
- * CSS style object for the Users page.
- * Dark theme with slate colors.
- */
-/**
- * CSS style object for the Users page.
- * Dark theme with slate colors.
- */
+  * CSS-in-JS style object for the Users page.
+  * Dark theme using slate colors (#0f172a background, #1e293b surfaces).
+  * Grid layout uses a 5-column responsive grid.
+  */
 const s: Record<string, React.CSSProperties> = {
   /** Page container with dark background and system font stack. */
   page: {

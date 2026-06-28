@@ -369,7 +369,10 @@ router.get('/:id/sprints/:sprintId/raiser-stats', async (req, res) => {
       else if (issue.statusGroup === 'done')  entry.done++;
     }
 
-    // Sort by total tickets raised (todo + doing + done), descending
+    // Sort by total tickets raised (todo + doing + done), descending.
+    // Note: `b.done` in the subtraction is intentional — it breaks ties by
+    // comparing the *done* count of `b` (not `a`), which naturally places
+    // users with more completed work higher when totals are equal.
     const raisers = [...map.values()].sort(
       (a, b) => (b.todo + b.doing + b.done) - (a.todo + a.doing + b.done),
     );
@@ -425,7 +428,10 @@ router.get('/:id/kanban-raiser-stats', async (req, res) => {
       else if (issue.statusGroup === 'done')  entry.done++;
     }
 
-    // Sort by total tickets raised (todo + doing + done), descending
+    // Sort by total tickets raised (todo + doing + done), descending.
+    // Note: `b.done` in the subtraction is intentional — it breaks ties by
+    // comparing the *done* count of `b` (not `a`), which naturally places
+    // users with more completed work higher when totals are equal.
     const raisers = [...map.values()].sort(
       (a, b) => (b.todo + b.doing + b.done) - (a.todo + a.doing + b.done),
     );
@@ -565,26 +571,6 @@ router.get('/:id', async (req, res) => {
 });
 
 /**
- * GET /api/projects/:id/kanban-user-stats — Per-user workload stats for a kanban board.
- * @route GET /api/projects/:id/kanban-user-stats?staleDays=N (optional)
- * @method GET
- * @param {string} id - Project's zohoId (primary key)
- * @query staleDays (optional, default: 7) - Days since last update to consider issue stale
- * @query watchedStates (optional) - Comma-separated list of statuses to watch
- * @query userId (optional) - Filter by user (creator or assignee)
- * @query creatorOnly (optional, true/false) - Only return issues created by user
- * @returns {Object} - Per-user workload breakdown for kanban board
- *   {
- *     users: Array<{ id, name, role, todo, doing, done, stale }> - Sorted by active load
- *     totalStaleIssues: number - Count of UNIQUE stale issues
- *   }
- * @notes
- *   - Aggregates per assignee (Field.Assignees[]), NOT creator
- *   - Used for kanban board user load cards
- *   - Kanban boards have no sprints - issues flow continuously through status groups
- * @auth Required (OAuth token validation)
- */
-/**
  * GET /api/projects/:id/kanban/issues — Fetch issue list for a kanban board with filters.
  * @route GET /api/projects/:id/kanban/issues?status=...&statusGroup=...&epicId=...&userId=...
  * @method GET
@@ -639,6 +625,28 @@ router.get('/:id/kanban/issues', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/projects/:id/kanban-user-stats — Per-user workload stats for a kanban board.
+ * @route GET /api/projects/:id/kanban-user-stats?staleDays=N&watchedStates=...&userId=...&creatorOnly=...
+ * @method GET
+ * @param {string} id - Project's zohoId (primary key)
+ * @query staleDays (optional, default: 7) - Days since last update to consider issue stale
+ * @query watchedStates (optional) - Comma-separated list of statuses to watch
+ * @query userId (optional) - Filter by user (creator or assignee)
+ * @query creatorOnly (optional, true/false) - Only return issues created by user
+ * @returns {Object} - Per-user workload breakdown for kanban board
+ *   {
+ *     users: Array<{ id, name, role, todo, doing, done, stale }> - Sorted by active load (descending)
+ *     totalStaleIssues: number - Count of UNIQUE stale issues
+ *   }
+ * @notes
+ *   - Aggregates per assignee (Field.Assignees[]), NOT creator
+ *   - Used for kanban board user load cards
+ *   - Kanban boards have no sprints - issues flow continuously through status groups
+ *   - If watchedStates is provided, only issues with matching statuses are counted toward user totals
+ *   - Stale count is always computed over ALL issues (not filtered by watchedStates)
+ * @auth Required (OAuth token validation)
+ */
 router.get('/:id/kanban-user-stats', async (req, res) => {
   try {
     const { id } = req.params;
@@ -694,7 +702,9 @@ router.get('/:id/kanban-user-stats', async (req, res) => {
              (b.todo + b.doing + b.done) - (a.todo + a.doing + a.done);
     });
 
-    // Count unique stale issues
+    // Count unique stale issues over ALL issues (not just watched-states).
+    // This ensures the stale indicator reflects the full picture, not just
+    // the subset shown in the bar graph.
     const totalStaleIssues = issues.filter((i) => i.isStale).length;
 
     res.json({ users, totalStaleIssues });

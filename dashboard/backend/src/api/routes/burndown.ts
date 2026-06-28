@@ -38,6 +38,9 @@ router.get('/', async (req: Request<{ sprintZohoId: string }>, res) => {
 
     // Seed or correct today's snapshot using live counts from the caller.
     // Always upsert when seed values are provided so stale DB entries get fixed.
+    // We filter out any existing entry for today before appending the fresh one
+    // to avoid duplicates in the returned array. The final sort ensures the
+    // snapshots are ordered chronologically (oldest → newest).
     if (seedDone !== null && seedTotal !== null && seedTotal > 0) {
       await recordBurndownSnapshot(sprintZohoId, seedDone, seedTotal);
       const todayEntry = { date: today, doneCount: seedDone, totalCount: seedTotal };

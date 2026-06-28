@@ -1,22 +1,67 @@
 import axios from 'axios';
 import { config } from '../config';
 
-/** Token state: holds the current OAuth access token and expiration timestamp. */
+/**
+ * Internal state for a Zoho OAuth token pair.
+ *
+ * @remarks
+ * This interface is used exclusively by this module to track the current
+ * access token and its expiration window. It is not exported.
+ */
 interface TokenState {
-  accessToken: string;  // Current active access token
-  expiresAt: number;    // Unix timestamp when token expires (ms)
+  /** The current active Zoho OAuth access token. */
+  accessToken: string;
+  /** Unix timestamp (milliseconds) at which `accessToken` expires. */
+  expiresAt: number;
 }
 
-/** Refresh buffer: 5 minutes before token expiry to request new token proactively. */
+/**
+ * Buffer window: 5 minutes before actual expiry.
+ *
+ * @remarks
+ * The auto-refresh timer fires this many milliseconds prior to `expiresAt`
+ * so that the new token is obtained before the old one becomes invalid,
+ * avoiding race conditions with in-flight requests.
+ */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
-// Global token state and auto-refresh timer (initialized during app startup)
+/**
+ * Module-level singleton holding the current OAuth token.
+ *
+ * @remarks
+ * Set to `null` until `initAuth()` is called (typically at app startup).
+ * All downstream consumers should call `initAuth()` first.
+ */
 let tokenState: TokenState | null = null;
+
+/**
+ * Handle for the auto-refresh timer.
+ *
+ * @remarks
+ * Cleared and recreated whenever the schedule is recalculated (e.g., after
+ * a successful refresh or when the module is reloaded).
+ */
 let refreshTimer: NodeJS.Timeout | null = null;
 
 /**
- * Fetch a new OAuth access token from Zoho using the refresh token.
- * Uses client credentials grant type to exchange refresh_token for access_token.
+ * Fetches a fresh OAuth access token from Zoho by exchanging the stored
+ * refresh token.
+ *
+ * @param _ — This function takes no parameters; credentials are read from
+ *        the module-level `config` object.
+ * @returns A promise resolving to a `TokenState` containing the new access
+ *          token and its computed expiration timestamp.
+ * @throws {Error} When Zoho returns an error response or the response lacks
+ *                 an `access_token` field. The error message includes the
+ *                 raw Zoho error payload for debugging.
+ *
+ * @remarks
+ * - Uses the `refresh_token` grant type (OAuth 2.0).
+ * - The refresh token itself is static — it comes from `config.zoho.refreshToken`
+ *   and is **not** rotated by this function. If Zoho revokes or rotates the
+ *   refresh token externally, `initAuth()` must be re-run with updated config.
+ * - On network errors the original Axios error is re-thrown with an augmented
+ *   message that includes the HTTP status code and response body.
  */
 async function fetchNewToken(): Promise<TokenState> {
   const params = new URLSearchParams({
@@ -53,8 +98,23 @@ async function fetchNewToken(): Promise<TokenState> {
 }
 
 /**
- * Schedule automatic token refresh before expiry (REFRESH_BUFFER_MS ahead).
- * Retries every 60 seconds if refresh fails.
+ * Schedules a one-shot timer that calls `fetchNewToken()` just before the
+ * current token expires.
+ *
+ * @remarks
+ * - Only runs when `tokenState` is non-null (i.e., after `initAuth()` has
+ *   been called).
+ * - If the refresh succeeds, the function **recursively** calls itself to
+ *   schedule the next refresh cycle, creating a self-sustaining loop for
+ *   the lifetime of the process.
+ * - If the refresh fails, a fallback timer retries every 60 seconds until
+ *   success. This prevents the module from entering a permanent broken state.
+ * - Clearing stale timers via `clearTimeout` ensures that rapid successive
+ *   calls (e.g., during hot-reload in development) do not accumulate
+ *   duplicate timers.
+ *
+ * @throws Does not throw; errors are logged to `console` and handled
+ *         via the retry mechanism described above.
  */
 function scheduleRefresh(): void {
   if (!tokenState) return;
@@ -76,7 +136,36 @@ function scheduleRefresh(): void {
   }, delay);
 }
 
-/** Initialize OAuth token on app startup. Calls fetchNewToken() and starts auto-refresh timer. */
+/**
+ * Initializes the Zoho OAuth session at application startup.
+ *
+ * @remarks
+ * Call this function once during your server's bootstrap sequence (e.g.,
+ * in your Express app entry point or Fastify `onReady` hook). It performs
+ * two actions:
+ *
+ * 1. Fetches an access token via `fetchNewToken()`.
+ * 2. Starts the periodic auto-refresh timer via `scheduleRefresh()`.
+ *
+ * After successful initialization, `getAccessToken()` and
+ * `getTokenExpiresAt()` will return the token and its expiration
+ * timestamp for use in downstream Zoho API calls.
+ *
+ * @throws {Error} If the initial token fetch fails (delegated to
+ *                 `fetchNewToken`'s error handling). The application
+ *                 should treat this as a fatal startup error and
+ *                 abort.
+ *
+ * @example
+ * ```ts
+ * import { initAuth } from './services/zohoAuth';
+ *
+ * async function main() {
+ *   await initAuth();
+ *   startServer();
+ * }
+ * ```
+ */
 export async function initAuth(): Promise<void> {
   tokenState = await fetchNewToken();
   const expiresInMin = Math.round((tokenState.expiresAt - Date.now()) / 60_000);
@@ -84,13 +173,46 @@ export async function initAuth(): Promise<void> {
   scheduleRefresh();  // Start periodic refresh
 }
 
-/** Get the current OAuth access token. Throws if auth not initialized. */
+/**
+ * Returns the current OAuth access token.
+ *
+ * @returns The active Zoho access token string.
+ * @throws {Error} If `initAuth()` has not been called yet (i.e., the module
+ *                 is in an uninitialized state).
+ *
+ * @remarks
+ * This function is the primary way for downstream services (e.g., Zoho
+ * Books, Zoho CRM clients) to obtain the bearer token for API requests.
+ * The token is managed internally by the auto-refresh timer; callers
+ * should never need to handle token lifecycle themselves.
+ *
+ * For the expiration timestamp, use `getTokenExpiresAt()` instead of
+ * parsing this token.
+ */
 export function getAccessToken(): string {
   if (!tokenState) throw new Error('Zoho auth not initialized');
   return tokenState.accessToken;
 }
 
-/** Get the token expiration timestamp (Unix ms). Throws if auth not initialized. */
+/**
+ * Returns the Unix timestamp (milliseconds) at which the current access
+ * token expires.
+ *
+ * @returns The expiration timestamp in Unix milliseconds.
+ * @throws {Error} If `initAuth()` has not been called yet.
+ *
+ * @remarks
+ * Useful for logging, monitoring, or defensive checks before making
+ * a Zoho API call. Compare the return value against `Date.now()` to
+ * determine remaining lifetime:
+ *
+ * ```ts
+ * const remainingMs = getTokenExpiresAt() - Date.now();
+ * if (remainingMs < 60_000) {
+ *   console.warn('Zoho token expires in under 1 minute');
+ * }
+ * ```
+ */
 export function getTokenExpiresAt(): number {
   if (!tokenState) throw new Error('Zoho auth not initialized');
   return tokenState.expiresAt;

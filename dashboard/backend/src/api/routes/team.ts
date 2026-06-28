@@ -4,6 +4,9 @@
  * Aggregates WIP (Work In Progress) and stale issue counts per user from ALL active
  * sprints in the system. This differs from sprint-specific endpoints which report
  * metrics for a single sprint only.
+ *
+ * This module is mounted as a sub-router under the main API router, so all routes
+ * are prefixed with `/api/team` (e.g., `GET /api/team/load`).
  */
 
 import { Router } from 'express';
@@ -32,6 +35,9 @@ const router = Router();
  */
 router.get('/load', async (req, res) => {
   try {
+    // Parse `staleDays` from query params with validation: clamp to minimum of 1, default to 7.
+    // The `|| 7` fallback guards against NaN results from parseInt when the query value
+    // is non-numeric (e.g., `?staleDays=abc`).
     const staleDays = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
     const { users, sprintCount, projectCount } = await queryTeamLoad(staleDays);
     res.json({ users, sprintCount, projectCount, staleDays });

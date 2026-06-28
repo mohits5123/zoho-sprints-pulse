@@ -1,9 +1,19 @@
 /**
- * Sprints API - Sprint management and health data.
+ * Sprints API — Sprint management and health data.
  *
- * Endpoints for listing all stored sprint snapshots, syncing sprints from Zoho, and
- * debugging Sprint endpoint responses. The sync operation is fire-and-forget to avoid
- * long-running HTTP requests and return data to the caller immediately.
+ * Provides endpoints for listing stored sprint snapshots, syncing sprints from Zoho
+ * Projects, fetching historical sprint data, and debugging Zoho API responses.
+ *
+ * Architecture notes:
+ *   - All sprint data is cached in SQLite; endpoints read from the local DB, not live Zoho.
+ *   - Sync operations are fire-and-forget: the API responds immediately and the full sync
+ *     runs asynchronously via `setImmediate` to avoid HTTP timeout (Zoho rate limit: 25 req/min).
+ *   - The `hidden` flag on sprints is client-managed only and never overwritten by sync.
+ *
+ * Dependencies:
+ *   - `../../services/zohoSprints` — core sync logic (runFullSync, fetchPastSprintNames/Data)
+ *   - `../../services/zohoAuth`     — OAuth token management
+ *   - `../../db/client`             — Prisma client for SQLite persistence
  */
 
 import { Router } from 'express';
@@ -17,15 +27,17 @@ const router = Router();
 
 /**
  * GET /api/sprints — List all stored sprint snapshots.
+ *
+ * Returns every sprint record currently persisted in the local SQLite database,
+ * regardless of sprint state (past, active, or future). Data is only refreshed
+ * when a sync endpoint is called — this endpoint never queries Zoho directly.
+ *
  * @route GET /api/sprints
  * @method GET
- * @headers Content-Type: application/json
- * @returns {Object} - Sprint list with metadata
- *   { sprints: Sprint[], total: number }
- * @notes
- *   - Returns all sprints from SQLite (includes past, active, and future sprints)
- *   - Sprints are ordered by projectName ascending (alphabetical)
- *   - Data is populated during sync or manual refresh; not live from Zoho on each request
+ * @returns {Object} Response object
+ *   @property {Sprint[]} sprints  — All sprint records, sorted alphabetically by project name
+ *   @property {number}   total    — Total count of sprint records
+ * @errors 500 — Database read failure
  * @auth Required (OAuth token validation)
  */
 router.get('/', async (_req, res) => {
@@ -41,25 +53,35 @@ router.get('/', async (_req, res) => {
 
 /**
  * GET /api/sprints/debug/:projectId — Probe Zoho sprint endpoint with various params for debugging.
+ *
+ * Makes a series of sequential API calls to Zoho to inspect the raw data structure
+ * for a given project. Useful for diagnosing sync issues or understanding how Zoho
+ * organizes items across backlog and active sprint boards.
+ *
+ * The endpoint performs four independent probes:
+ *   1. Fetches the status map (name → bucket: todo/doing/done) via `/itemstatus/`
+ *   2. Retrieves the backlog ID via the project root with `action=getbacklog`
+ *   3. Paginates ALL backlog items and aggregates per-status counts
+ *   4. Fetches the active sprint's kanban board (type 7) and its item counts
+ *
  * @route GET /api/sprints/debug/:projectId
  * @method GET
- * @params {string} projectId - The Zoho project ID to probe (e.g., "22612000001241150")
- * @returns {Object} - Debug data from Zoho API probing
- *   {
- *     projectId: string,
- *     statuses: Record<string, string> - Status name to statusGroupMap mapping (todo/doing/done)
- *     backlogId: string - The backlog's unique identifier (if exists), or undefined
- *     backlogItems: { total, statusCounts } - Total items in backlog + count per status
- *     kanbanBoardId: string | null - ID of the active sprint's board (type 7)
- *     boardItems: { total, statusCounts } - Items on the active sprint's kanban + counts
- *   }
+ * @param {string} projectId — The Zoho project ID to probe (e.g., `"22612000001241150"`)
+ * @returns {Object} Debug response
+ *   @property {Record<string, string>} statuses      — Status ID → bucket mapping (todo/doing/done)
+ *   @property {string|undefined}       backlogId      — Backlog's unique identifier for pagination
+ *   @property {Object}                 backlogItems   — Aggregated backlog item stats
+ *     @property {number} total           — Total items across all statuses
+ *     @property {Record<string, number>} statusCounts — Items grouped by status label
+ *   @property {string|null}            kanbanBoardId  — Active sprint (type 7) board ID
+ *   @property {Object}                 boardItems     — Kanban board item stats (same shape as backlogItems)
+ * @errors 400 — Team ID not cached; run user sync first
+ *         500 — Zoho API error or timeout
  * @notes
- *   - Debug endpoint for troubleshooting Zoho API issues and understanding data structure
- *   - Requires zoho_team_id to be cached (run user sync first if missing)
- *   - Makes multiple paginated API calls to Zoho; can be slow for large projects
- * @errors 400 - Team ID not cached (run user sync first)
- *   500 - Zoho API error or timeout
- * @auth Required (OAuth token validation via getAccessToken())
+ *   - Requires `zoho_team_id` to be cached (populated during user sync).
+ *   - Makes multiple paginated API calls; may be slow for large projects with many items.
+ *   - Each page fetches up to 100 items; pagination continues until no more pages remain.
+ *   - Zoho status type codes: `0` = todo, `2` = doing (in_progress), `1` = done.
  */
 router.get('/debug/:projectId', async (req, res) => {
   try {
@@ -78,6 +100,7 @@ router.get('/debug/:projectId', async (req, res) => {
     const base  = `${config.zoho.apiBaseUrl}/team/${teamId}/projects/${projectId}`;
 
     // 1. Fetch status map via /itemstatus/
+    // Zoho returns status data as an array-of-arrays; status_prop maps column names to array indices.
     const statusRes = await axios.get(`${base}/itemstatus/`, {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
       params: { action: 'data' },
@@ -87,27 +110,30 @@ router.get('/debug/:projectId', async (req, res) => {
     const statusJObj = statusRaw?.statusJObj as Record<string, unknown[]> | undefined;
     const statusProp = (statusRaw?.status_prop as Record<string, number>) ?? {};
     
-    // Status index: name=0, type=4 (or use fallbacks)
+    // status_prop maps field names to their column index in the statusJObj arrays.
+    // Defaults: name at index 0, type at index 4 (Zoho's standard layout).
     const nameIdx = statusProp.statusName ?? 0;
     const typeIdx = statusProp.statusType ?? 4;
     
-    // Zoho status types: 0=todo, 2=doing (in_progress), 1=done
+    // Zoho status type codes: 0=todo, 2=doing (in_progress), 1=done.
+    // This maps the numeric type to a human-readable bucket for aggregation.
     const TYPE_MAP: Record<number, string> = { 0: 'todo', 2: 'doing', 1: 'done' };
     
-    const statusMap: Record<string, string> = {};   // status ID -> human-readable name
-    const statusGroupMap: Record<string, string> = {}; // status ID -> bucket (todo/doing/done)
+    const statusMap: Record<string, string> = {};                 // status ID → human-readable name
+    const statusGroupMap: Record<string, string> = {};            // status ID → bucket (todo/doing/done)
     
     if (statusJObj) {
       for (const [id, fields] of Object.entries(statusJObj)) {
         const name = String(fields[nameIdx] ?? 'Unknown').trim();
         const typeCode = typeof fields[typeIdx] === 'number' ? (fields[typeIdx] as number) : 0;
         statusMap[id] = name;
-        // Map to bucket based on type code (or default to todo)
+        // Map to bucket based on type code; default to 'todo' if type is unrecognized.
         statusGroupMap[name] = TYPE_MAP[typeCode] ?? 'todo';
       }
     }
 
     // 2. Fetch backlogId via / with action=getbacklog
+    // The backlog ID is required to paginate all items within the project.
     const backlogRes = await axios.get(`${base}/`, {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
       params: { action: 'getbacklog' },
@@ -115,7 +141,9 @@ router.get('/debug/:projectId', async (req, res) => {
     
     const backlogId = (backlogRes.data as Record<string, unknown>)?.backlogId as string | undefined;
 
-    // 3. Paginate ALL items from backlogId and collect per-status counts
+    // 3. Paginate ALL items from backlogId and collect per-status counts.
+    // Zoho paginates in pages of up to 100 items; we iterate until `next` is absent
+    // or the page contains fewer than 100 items (indicating the last page).
     let backlogItems: { total: number; statusCounts: Record<string, number> } = { total: 0, statusCounts: {} };
     if (backlogId) {
       let index = 1;
@@ -131,7 +159,8 @@ router.get('/debug/:projectId', async (req, res) => {
         const itemJObj = raw?.itemJObj as Record<string, unknown[]> | undefined;
         const itemProp = (raw?.item_prop as Record<string, number>) ?? {};
         
-        // Status index from item properties (fallback chain)
+        // Status index from item properties, with a fallback chain because Zoho's
+        // API schema may use different field names across project versions.
         const statusIdx = itemProp.statusId ?? itemProp.status ?? itemProp.itemStatus ?? -1;
         
         backlogItems.total += itemIds.length;
@@ -141,7 +170,8 @@ router.get('/debug/:projectId', async (req, res) => {
             const f = itemJObj[id];
             if (!f) continue;
             
-            // Get raw status field value (or -1 for unassigned if no status)
+            // Resolve the status label using the map built in step 1.
+            // If statusIdx < 0 the item has no status assigned; use empty string.
             const rawStatus = statusIdx >= 0 ? String(f[statusIdx]) : '';
             const label = statusMap[rawStatus] ?? rawStatus ?? 'Unknown';
             
@@ -149,24 +179,24 @@ router.get('/debug/:projectId', async (req, res) => {
           }
         }
         
-        // Stop if no more pages or last page has fewer than 100 items
+        // Stop if no more pages or last page has fewer than 100 items.
         if (!raw?.next || itemIds.length < 100) break;
         index += 100;
       }
     }
 
-    // 4. type=[7] gives kanbanBoardId — fetch items from it + probe project details for kanbanBoardId
-    // Type 7 represents a Sprint in Zoho's schema
+    // 4. Fetch the active sprint's kanban board (type 7 in Zoho's schema) and its items.
+    // Zoho uses numeric type codes; 7 specifically denotes a Sprint entity.
     const kanbanType7Res = await axios.get(`${base}/sprints/`, {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
       params: { action: 'data', index: 1, range: 50, type: '[7]' },
     }).catch(err => ({ data: { __error: err.response?.status } }));
     
     const type7Raw = kanbanType7Res.data as Record<string, unknown>;
-    // sprintIds array contains the IDs of active sprints; take the first one as kanbanBoardId
+    // sprintIds contains IDs of all type-7 sprints; we take the first (most recent/active).
     const kanbanBoardId = ((type7Raw?.sprintIds as string[] | undefined) ?? [])[0];
 
-    // Fetch items from kanbanBoardId (all pages, same pagination logic as backlog)
+    // Fetch items from the kanban board using the same pagination logic as backlog items.
     let boardItems: { total: number; statusCounts: Record<string, number> } = { total: 0, statusCounts: {} };
     if (kanbanBoardId) {
       let index = 1;
@@ -182,7 +212,7 @@ router.get('/debug/:projectId', async (req, res) => {
         const itemJObj = raw?.itemJObj as Record<string, unknown[]> | undefined;
         const itemProp = (raw?.item_prop as Record<string, number>) ?? {};
         
-        // Same status index logic as backlog items
+        // Reuse the same status index resolution as backlog (with fallback chain).
         const statusIdx = itemProp.statusId ?? itemProp.status ?? itemProp.itemStatus ?? -1;
         
         boardItems.total += itemIds.length;
@@ -192,7 +222,7 @@ router.get('/debug/:projectId', async (req, res) => {
             const f = itemJObj[id];
             if (!f) continue;
             
-            // Get raw status field value (or -1 for unassigned if no status)
+            // Resolve status label; items without a status get an empty string label.
             const rawStatus = statusIdx >= 0 ? String(f[statusIdx]) : '';
             const label = statusMap[rawStatus] ?? rawStatus ?? 'Unknown';
             
@@ -200,7 +230,7 @@ router.get('/debug/:projectId', async (req, res) => {
           }
         }
         
-        // Stop if no more pages or last page has fewer than 100 items
+        // Stop if no more pages or last page has fewer than 100 items.
         if (!raw?.next || itemIds.length < 100) break;
         index += 100;
       }
@@ -223,18 +253,28 @@ router.get('/debug/:projectId', async (req, res) => {
 
 /**
  * POST /api/sprints/sync — Fire-and-forget sprint sync.
+ *
+ * Triggers a full synchronization of projects and sprints from Zoho Projects into the
+ * local SQLite database. The API responds **immediately** with the current database state
+ * while the actual sync runs asynchronously in the background.
+ *
+ * Sync behaviour:
+ *   - **Idempotent**: Uses upsert with the unique `zohoId` from Zoho; no duplicate records.
+ *   - **Background execution**: `runFullSync()` is dispatched via `setImmediate` so the
+ *     HTTP response is never delayed, even though full sync may take several minutes.
+ *   - **Rate-limited**: Zoho enforces 25 requests/minute; large teams will take longer.
+ *   - **Error isolation**: Failures in the background sync are logged but do not affect
+ *     the immediate response or require client retry.
+ *
  * @route POST /api/sprints/sync
  * @method POST
  * @headers Content-Type: application/json, Authorization: Zoho-oauthtoken (from session)
- * @returns {Object} - Immediate response with current sprint list, sync runs in background
- *   { synced: 0, sprints: Sprint[], status: 'started' }
- * @notes
- *   - Idempotent: Uses upsert pattern with unique zohoId key (from Zoho)
- *   - Responds IMMEDIATELY with current DB state to avoid timeout
- *   - Full sync (projects + sprints) runs in BACKGROUND via setImmediate
- *   - Respects rate limiter (25 req/min); large teams may take several minutes for full sync
- *   - Background sync is fire-and-forget; errors are logged but don't block the response
- * @auth Required (OAuth token validation via syncZohoProjects())
+ * @returns {Object} Immediate response
+ *   @property {number}   synced   — Always `0` (sync hasn't completed yet at response time)
+ *   @property {Sprint[]} sprints  — Current snapshot from the database
+ *   @property {string}   status   — Always `'started'`
+ * @errors 500 — Unexpected server error (unlikely; sync runs in background)
+ * @auth Required (OAuth token validation via `runFullSync()`)
  */
 router.post('/sync', async (_req, res) => {
   // Respond with current DB state immediately (avoids long-running HTTP request timeout)
@@ -258,20 +298,32 @@ router.post('/sync', async (_req, res) => {
 
 /**
  * POST /api/sprints/fetch-past — Fetch past (completed) sprints for a project.
+ *
+ * Supports a two-step flow for retrieving historical sprint data:
+ *   1. **List mode** (no `sprintZohoId`): returns metadata for all past sprints.
+ *   2. **Data mode** (`sprintZohoId` provided): fetches full issue data and burndown
+ *      snapshots for a specific sprint.
+ *
+ * Unlike the regular sync endpoint, past-sprint issues are **upserted** (never deleted),
+ * ensuring historical data persists across syncs.
+ *
  * @route POST /api/sprints/fetch-past
  * @method POST
  * @headers Content-Type: application/json
  * @body { projectZohoId: string, sprintZohoId?: string }
- *   - If sprintZohoId is omitted: returns list of past sprint names/IDs only
- *   - If sprintZohoId is provided: fetches full data (issues, burndown) for that sprint
- * @returns { Object }
- *   - List mode: { sprints: SprintRaw[] } — sprint metadata only
- *   - Data mode: { sprint: SprintSnapshot } — fully synced sprint with issues
+ *   @property {string} projectZohoId  — Required. Zoho project identifier.
+ *   @property {string} [sprintZohoId] — Optional. If omitted, returns list mode.
+ * @returns {Object} Response depends on mode
+ *   - **List mode** (`sprintZohoId` omitted):
+ *     @property {SprintRaw[]} sprints — Sprint metadata (name, zohoId, dates) only.
+ *   - **Data mode** (`sprintZohoId` provided):
+ *     @property {SprintSnapshot} sprint — Full sprint with issues and burndown data.
+ * @errors 400 — Missing projectZohoId
+ *         404 — Specified sprintZohoId not found in the project's past sprints
+ *         500 — Zoho API or database error
  * @notes
- *   - Two-step flow: first fetch names, then fetch full data per sprint
- *   - Issues for past sprints are upserted (NOT deleted like regular sync)
- *   - Burndown snapshots are recorded for each fetched sprint
- *   - User-triggered only, not part of regular sync
+ *   - User-triggered only; not part of the automatic background sync cycle.
+ *   - Burndown snapshots are recorded for each fetched sprint.
  * @auth Required (OAuth token validation)
  */
 router.post('/fetch-past', async (req, res) => {
@@ -309,17 +361,20 @@ router.post('/fetch-past', async (req, res) => {
 });
 
 /**
- * PATCH /api/sprints/:id/display — Toggle hidden for a sprint.
+ * PATCH /api/sprints/:id/display — Toggle the hidden flag for a sprint.
+ *
+ * Updates the `hidden` field on a sprint record. This flag controls whether the sprint
+ * appears in the sprint health view on the frontend. It is a **client-managed** field —
+ * it is never overwritten by Zoho sync operations and persists across syncs.
+ *
  * @route PATCH /api/sprints/:id/display
  * @method PATCH
- * @param {string} id - Sprint's zohoId (primary key)
- * @body {Object} body: { hidden: boolean }
- * @returns {Object} - Updated sprint object
- *   { sprint: Sprint }
- * @notes
- *   - hidden flag determines if sprint appears in the sprint health view
- *   - This field is NOT synced from Zoho and persists across syncs
- * @errors 500 - Database error
+ * @param {string} id — The sprint's `zohoId` (used as the primary key in SQLite).
+ * @body { hidden: boolean }
+ *   @property {boolean} hidden — `true` to hide, `false` to show.
+ * @returns {Object}
+ *   @property {Sprint} sprint — The updated sprint record.
+ * @errors 500 — Database update failure
  * @auth Required (OAuth token validation)
  */
 router.patch('/:id/display', async (req, res) => {

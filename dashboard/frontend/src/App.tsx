@@ -29,6 +29,25 @@ import { SyncProgressProvider } from './contexts/SyncProgressContext';
  *
  * Provides the main routing configuration for the dashboard. All routes
  * are defined here, mapping URL paths to their corresponding page components.
+ *
+ * The component wraps the entire application in two providers:
+ * - `SyncProgressProvider` — exposes sync progress state to all descendants
+ *   via React context, enabling the `SyncProgressBar` to display real-time
+ *   progress indicators regardless of which page the user is on.
+ * - `BrowserRouter` — enables client-side routing powered by React Router v6,
+ *   allowing navigation between pages without full page reloads.
+ *
+ * Route summary:
+ * - `/` — Home / dashboard overview
+ * - `/users` — User management and team workload
+ * - `/users/:userId` — Individual user profile
+ * - `/projects` — Project listing with board type controls
+ * - `/sprints` — Sprint-level health metrics
+ * - `/board/:projectId` — Kanban / Scrum board for a specific project
+ * - `/board/:projectId/issues` — Detailed issue list for a specific project
+ * - `/backlog/:projectId` — Backlog view for a specific project
+ *
+ * @returns The rendered application shell with routing and progress tracking.
  */
 export default function App() {
   return (

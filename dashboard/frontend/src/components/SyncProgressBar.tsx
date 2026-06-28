@@ -32,6 +32,8 @@ const LIGHT_BLUE = 'rgba(59,130,246,0.3)';
 const TRACK_COLOR = 'rgba(255,255,255,0.08)';
 
 export function SyncProgressBar() {
+  // Whether the parent app has initiated a sync operation.
+  // When true, this component begins polling the backend for progress updates.
   const { syncActive, setSyncActive } = useSyncProgress();
 
   const [progress, setProgress] = useState<{
@@ -48,8 +50,10 @@ export function SyncProgressBar() {
     totalRequests: 0,
   });
 
-  // Track whether we've ever seen inProgress=true to detect syncs that
-  // don't call startSync() on the backend (e.g. users sync, projects sync).
+  // Tracks whether we've ever seen `inProgress: true` from the API. This is
+  // used by the 10-second safety timeout to detect "orphaned" syncs — syncs
+  // initiated by the UI but never acknowledged by the backend (e.g. users
+  // sync or projects sync that don't call `startSync` on the backend).
   const hasSeenInProgress = useRef(false);
 
   const poll = useCallback(async () => {
@@ -100,6 +104,8 @@ export function SyncProgressBar() {
     };
   }, [syncActive, poll, setSyncActive]);
 
+  // Only render when the API reports the sync is actively in progress.
+  // Returning null hides the bar entirely.
   if (!progress.inProgress) {
     return null;
   }
@@ -107,9 +113,11 @@ export function SyncProgressBar() {
   const { percentage, isFirstSync, requestsMade, totalRequests } = progress;
 
   /**
-   * Determine the mode:
-   * - "indefinite": first sync, or requests already exceeded total (past 100%)
-   * - "definite": percentage is available and we haven't exceeded requests yet
+   * Determine the rendering mode:
+   * - "indefinite": first sync (no percentage yet), or the request quota has
+   *   been exhausted — both cases show an animated, indeterminate loader.
+   * - "definite": percentage is available and we haven't exceeded requests —
+   *   shows a bar that fills from 0% to 100%.
    */
   const requestsExceeded =
     totalRequests > 0 && requestsMade >= totalRequests;
@@ -129,6 +137,11 @@ export function SyncProgressBar() {
   /**
    * Definite mode: lighter blue background track with darker blue fill
    * growing proportionally to the percentage.
+   *
+   * Indefinite mode: uses a CSS `@keyframes syncLoader` animation (defined
+   * in the app's global styles) to create a sliding-bar effect. The animation
+   * keyframes must exist; otherwise this bar will appear static in indefinite
+   * mode.
    */
   const barStyle: React.CSSProperties = isDefinite
     ? {
@@ -148,6 +161,8 @@ export function SyncProgressBar() {
 
   /**
    * Darker blue overlay that fills over the lighter tint in definite mode.
+   * Width is driven by the `percentage` value from the API, with a smooth
+   * CSS transition for a polished visual effect.
    */
   const overlayStyle: React.CSSProperties | undefined = isDefinite
     ? {

@@ -421,7 +421,7 @@ export async function fetchPastSprintData(teamId: string, projectZohoId: string,
 /**
  * Parses raw Zoho /itemstatus/ response into a StatusMapResult.
  * 
- * The Zozo itemstatus endpoint returns an opaque JSON structure with status mappings
+ * The Zoho itemstatus endpoint returns an opaque JSON structure with status mappings
  * that varies in format across different projects. This function extracts the relevant
  * fields and converts them into a normalized, consistent format used throughout the app.
  * 
@@ -443,42 +443,22 @@ export async function fetchPastSprintData(teamId: string, projectZohoId: string,
  */
 
 /**
- * Fetch status map from Zoho and persist to DB cache.
+ * Parses raw Zoho /itemstatus/ response into a StatusMapResult.
  * 
- * Called ONLY by syncAll during the initial status map fetch phase. Never called
- * by runtime API handlers — those read from in-memory cache or DB instead.
+ * The Zoho itemstatus endpoint returns an opaque JSON structure with status mappings.
+ * This function extracts the relevant fields and converts them into a normalized format
+ * that can be used across all other functions in this module.
  * 
- * **Endpoint**: GET /team/{teamId}/projects/{projectZohoId}/itemstatus/
+ * **Input**: Raw response from GET /team/{teamId}/projects/{projectZohoId}/itemstatus/
  * 
- * **Process**:
- * 1. Call Zozo's itemstatus endpoint for the project
- * 2. Parse response using parseStatusMapResponse() to get normalized structure
- * 3. Store in DB: Project.statusMap field (JSON string) for persistence across restarts
- * 4. Cache in-memory: keyed by "${teamId}:${projectZohoId}" for fast lookups
+ * **Output**: StatusMapResult with:
+ *   - map: statusId → human-readable name (for lookups)
+ *   - orderedNames: statuses in Zoho's column order for kanban boards
+ *   - statusGroups: name → work stage (todo/doing/done) for burndown calculations
  * 
- * **When it runs**: One call per project during syncAll, immediately after epics sync.
- * This is why status maps are "Phase 3b" in the overall sync flow.
- * 
- * **Post-Sync Behavior**: After first sync completes, all status map lookups hit
- * cache or DB — no additional Zoho calls are made. New projects fetched after sync
- * will trigger this function via fetchStatusMap().
- */
-
-/**
- * DB-first status map lookup with three-tier caching.
- * 
- * **Lookup Order** (fastest to slowest):
- * 1. In-memory cache (statusMapCache) - O(1) map lookup, session-only
- * 2. SQLite DB (Project.statusMap field) - Persistent across app restarts  
- * 3. Zoho API fetch - Only if both above are empty (first project run)
- * 
- * **Why this order**: The priority is to minimize Zoho API calls. In-memory cache
- * is fastest (no network) but lost on restart. DB fetch is slower but persistent,
- * so it's the fallback that repopulates both layers.
- * 
- * **Thread Safety**: Not thread-safe under concurrent access. If two callers hit
- * the "no cache" path simultaneously, both will call Zoho, but only the first's
- * result is used; subsequent callers get cached data on next lookup.
+ * **Status Type Mapping**: Zoho uses numeric codes that vary by project. This function
+ * infers the group from the type code: 0=todo, 2=doing, 1=done. Falls back to 'todo'
+ * for unknown codes.
  */
 function parseStatusMapResponse(raw: Record<string, unknown>): StatusMapResult {  
   const statusJObj = raw?.statusJObj as Record<string, unknown[]> | undefined;
@@ -504,23 +484,33 @@ function parseStatusMapResponse(raw: Record<string, unknown>): StatusMapResult {
 }
 
 /**
- * Fetch status map from Zoho and persist to DB.
+ * Fetches the status map for a project from Zoho and persists it to both the database
+ * and the in-memory cache.
  * 
- * Called ONLY by syncAll during the initial status map fetch phase. Never called
- * by runtime API handlers — those read from cache or DB instead.
+ * Called ONLY by `syncAll` during the initial status map fetch phase. Never called
+ * by runtime API handlers — those read from the in-memory cache or DB instead.
+ * 
+ * **Endpoint**: GET /team/{teamId}/projects/{projectZohoId}/itemstatus/
  * 
  * **Process**:
  * 1. Call Zoho's /itemstatus/ endpoint for the project
- * 2. Parse response into StatusMapResult
- * 3. Update Project.statusMap field in DB with JSON string
- * 4. Populate in-memory cache for immediate access in subsequent sync iterations
+ * 2. Parse response using `parseStatusMapResponse()` to get normalized structure
+ * 3. Store in DB: `Project.statusMap` field (JSON string) for persistence across restarts
+ * 4. Cache in-memory: keyed by `"${teamId}:${projectZohoId}"` for fast lookups
  * 
- * **Caching**: The StatusMapResult is cached both:
- *   - In memory (statusMapCache) with key "${teamId}:${projectZohoId}"
- *   - In DB (Project.statusMap JSON field) persistently across sessions
+ * **When it runs**: One call per project during `syncAll`, immediately after epics sync.
+ * This is why status maps are "Phase 3b" in the overall sync flow.
  * 
- * **Performance**: This is one of the first calls in syncAll. Results are reused
- * by all subsequent sprint/issue fetches for the same project, avoiding redundant Zoho calls.
+ * **Post-Sync Behavior**: After first sync completes, all status map lookups hit
+ * cache or DB — no additional Zoho calls are made. New projects fetched after sync
+ * will trigger this function via `fetchStatusMap()`.
+ * 
+ * **Rate Limiting**: Uses dedicated throttle label `'statusMap/{projectZohoId}'`
+ * to prevent multiple projects from competing for the same rate limit bucket.
+ * 
+ * @param teamId - The Zoho team identifier
+ * @param projectZohoId - The Zoho project identifier
+ * @returns The parsed `StatusMapResult` containing status mappings and groupings
  */
 async function fetchStatusMapFromZoho(teamId: string, projectZohoId: string): Promise<StatusMapResult> {
   const token = getAccessToken();
@@ -549,19 +539,6 @@ async function fetchStatusMapFromZoho(teamId: string, projectZohoId: string): Pr
 }
 
 /**
- * Parses raw Zoho /itemstatus/ response into a StatusMapResult.
- */
-
-/**
- * Fetch status map from Zoho and persist to DB cache.
- */
-
-/**
- * DB-first status map lookup with three-tier caching.
- */
-
-
-/**
  * DB-first status map lookup. Order: in-memory cache → DB → Zoho (first-run fallback only).
  * 
  * **Caching Strategy**: Three-tier lookup to minimize Zoho API calls:
@@ -574,6 +551,10 @@ async function fetchStatusMapFromZoho(teamId: string, projectZohoId: string): Pr
  * 
  * **Thread Safety**: Not thread-safe. If multiple async callers invoke this concurrently,
  * the first one to reach Zoho will populate both cache and DB. Subsequent callers get cached data.
+ * 
+ * @param teamId - The Zoho team identifier
+ * @param projectZohoId - The Zoho project identifier
+ * @returns The `StatusMapResult` containing status mappings and groupings
  */
 async function fetchStatusMap(teamId: string, projectZohoId: string): Promise<StatusMapResult> {
   const cacheKey = `${teamId}:${projectZohoId}`;
@@ -598,6 +579,34 @@ async function fetchStatusMap(teamId: string, projectZohoId: string): Promise<St
   return fetchStatusMapFromZoho(teamId, projectZohoId);
 }
 
+/**
+ * Fetches issue counts grouped by status for a given sprint.
+ * 
+ * This function paginates through all items in a sprint and tallies them by their
+ * current status. It is used to build the status breakdown (count per status label)
+ * that powers sprint analytics and burndown calculations.
+ * 
+ * **Endpoint Flow**:
+ * 1. GET /team/{teamId}/projects/{projectZohoId}/sprints/{sprintId}/item/
+ *    → Returns paginated list of items with their status IDs
+ * 2. Maps each status ID to a human-readable label via `statusMap`
+ * 3. Returns a tally: `{ "In Progress": 5, "Closed": 12, ... }`
+ * 
+ * **Rate Limiting**: Uses dedicated throttle label `'items/{sprintId}/p{page}'`
+ * to prevent multiple sprints from competing for the same rate limit bucket.
+ * 
+ * **Pagination**: Fetches in batches of 100 items. Stops when fewer than 100 items
+ * are returned or when Zoho signals no more pages are available (`!raw.next`).
+ * 
+ * **Error Handling**: On any API error, stops pagination immediately to avoid
+ * wasting rate limit buckets. Returns whatever counts have been accumulated so far.
+ * 
+ * @param teamId - The Zoho team identifier
+ * @param projectZohoId - The Zoho project identifier
+ * @param sprintId - The Zoho sprint identifier (not the project sprint name)
+ * @param statusMap - Map of Zoho status IDs to human-readable status names
+ * @returns Record mapping each status label to its issue count (e.g., `{ "In Progress": 5, "Closed": 12 }`)
+ */
 async function fetchItemsForSprint(
   teamId: string,
   projectZohoId: string,
@@ -790,6 +799,28 @@ async function fetchBacklogItems(
  * 
  * **Rate Limiting**: Uses dedicated throttle label 'kanban-id/{projectZohoId}'.
  */
+/**
+ * Fetches the kanban board sprint ID for a kanban-type project.
+ * 
+ * **Purpose**: Kanban projects in Zoho don't use traditional time-boxed sprints.
+ * Instead, they have a "board" represented as a sprint with type=[7]. This function
+ * locates that board sprint so its issues can be fetched and synced.
+ * 
+ * **Endpoint**: GET /team/{teamId}/projects/{projectZohoId}/sprints/ with type=[7]
+ * 
+ * **Return**: 
+ *   - The `zohoId` of the board sprint if found
+ *   - `null` if no board exists (project has never had items assigned)
+ * 
+ * **Usage**: The returned ID is then used with `fetchItemsForSprint` to get board item counts
+ * and with `syncIssues` to sync issues to the database.
+ * 
+ * **Rate Limiting**: Uses dedicated throttle label `'kanban-id/{projectZohoId}'`.
+ * 
+ * @param teamId - The Zoho team identifier
+ * @param projectZohoId - The Zoho project identifier
+ * @returns The zohoId of the kanban board sprint, or null if no board exists
+ */
 async function fetchKanbanBoardId(teamId: string, projectZohoId: string): Promise<string | null> {
   const token = getAccessToken();
   
@@ -817,8 +848,26 @@ async function fetchKanbanBoardId(teamId: string, projectZohoId: string): Promis
 // ── Epic fetching ─────────────────────────────────────────────────────────────
 
 /**
- * Phase 3a: Sync epics from Zoho and persist to Epic table
- * Called during main sync for each project
+ * Phase 3a: Fetches all epics for a project from Zoho and upserts them to the local Epic table.
+ * 
+ * **Endpoint**: GET /team/{teamId}/projects/{projectZohoId}/epic/ with action=data
+ * 
+ * **Process**:
+ * 1. Fetch all epics from Zoho (paginated, max 100 per page)
+ * 2. For each epic, upsert into the Epic table using the unique zohoId
+ * 3. Returns the count of epics upserted
+ * 
+ * **Idempotency**: Uses Prisma upsert — if an epic already exists, only the name
+ * and syncedAt timestamp are updated. The projectZohoId is also refreshed.
+ * 
+ * **Rate Limiting**: Uses dedicated throttle label `'epics/{projectZohoId}'`.
+ * 
+ * **Error Handling**: On any API error, logs the error and returns 0. The sync continues
+ * with other projects — this failure does not cascade.
+ * 
+ * @param teamId - The Zoho team identifier
+ * @param projectZohoId - The Zoho project identifier
+ * @returns The number of epics successfully upserted
  */
 async function syncEpics(teamId: string, projectZohoId: string): Promise<number> {
   const token = getAccessToken();
@@ -866,12 +915,39 @@ async function syncEpics(teamId: string, projectZohoId: string): Promise<number>
 }
 
 /**
- * Phase 3b: Sync issues from Zoho and persist to Issue table
- * Called during main sync for each sprint within a project
+ * Phase 3b: Fetches all issues for a sprint from Zoho and persists them to the Issue table.
  * 
- * Behavior:
- * - For closed sprints: delete all stored issues (to avoid stale data)
- * - For active sprints: upsert issues (merge with any manually created ones)
+ * Called during the main sync for each sprint (or backlog) within a project.
+ * 
+ * **Behavior by sprint status**:
+ * - **Active sprints**: Issues are upserted — new issues are inserted, existing ones are
+ *   updated. This preserves any manually created issues that don't exist in Zoho.
+ * - **Closed sprints**: After upserting current Zoho data, ALL stored issues for that
+ *   sprint are DELETED. This ensures stale data from closed sprints is never served
+ *   to users. (Note: `fetchPastSprintData` uses a different code path that upserts
+ *   instead of deleting, for historical preservation.)
+ * 
+ * **Endpoint**: GET /team/{teamId}/projects/{projectZohoId}/sprints/{sprintZohoId}/item/
+ * 
+ * **Data Transformations**:
+ * - Status IDs (opaque numeric strings) → human-readable names via the project's statusMap
+ * - AssigneeIds normalized to JSON string array (handles single string, comma-separated, or array formats)
+ * - Dates normalized: '-1' → null (Zoho's "no date set" sentinel)
+ * - Epic creator and assignee IDs stored as Zoho user IDs for later enrichment
+ * 
+ * **Pagination**: Fetches in batches of 100 issues. Stops when fewer than 100 issues
+ * are returned or when Zoho signals no more pages.
+ * 
+ * **Rate Limiting**: Uses dedicated throttle label `'issues/{sprintZohoId}/p{page}'`.
+ * 
+ * **Error Handling**: On any API error, stops pagination immediately to avoid wasting
+ * rate limit buckets. Returns whatever counts have been accumulated so far.
+ * 
+ * @param teamId - The Zoho team identifier
+ * @param projectZohoId - The Zoho project identifier
+ * @param sprintZohoId - The Zoho sprint (or backlog) identifier
+ * @param sprintStatus - The sprint's status: `'active'` for upsert, `'closed'` for delete
+ * @returns The number of issues successfully synced (upserted) before any potential deletion
  */
 async function syncIssues(
   teamId: string,
@@ -1127,43 +1203,70 @@ export interface IssueItem {
   isStale:     boolean;          // True if no update in staleDays threshold
 }
 
+/**
+ * Clears all in-memory caches used by this module.
+ * 
+ * Called at the start of each `syncAll()` run to ensure that status maps and any
+ * other cached data are fresh for the new sync cycle. The in-memory cache is
+ * repopulated as data is fetched from Zoho during the sync.
+ * 
+ * **What it clears**: Only the `statusMapCache` Map. The in-memory cache is
+ * session-only (lost on process restart) and does not persist across restarts.
+ * 
+ * **When it runs**: At the beginning of every `syncAll()` execution, before any
+ * Zoho API calls are made. This guarantees that stale cached data from a previous
+ * sync run is not used during the current sync.
+ * 
+ * **Thread Safety**: Not thread-safe. Should only be called synchronously at the
+ * start of `syncAll()`, before any concurrent access begins.
+ */
 export function clearZohoCache(): void {
   statusMapCache.clear();  // Status maps are re-fetched from DB on next sync call
 }
 
 /**
- * Full synchronization of all Zoho Projects data to local SQLite database.
+ * Full synchronization of all Zoho Projects data to the local SQLite database.
  * 
- * **What it does**: Fetches all projects, epics, sprints, and issues from Zoho
- * Sprints API and upserts them to the local database. This is the main sync operation
- * triggered by cron (every 3 hours) and manual user requests.
+ * This is the main sync operation triggered by cron (every 3 hours) and manual user requests.
+ * It fetches all projects, epics, sprints, backlog items, and issues from the Zoho Sprints API
+ * and upserts them to the local database.
  * 
  * **Sync Flow**:
- * 1. Clear all in-memory Zoho caches (ensure fresh data)
+ * 1. Clear all in-memory caches (ensures fresh status maps)
  * 2. Reset rate limiter stats
  * 3. Resolve team ID from settings
- * 4. Fetch all visible scrum and kanban projects
- * 5. For each project:
+ * 4. Fetch all visible scrum and kanban projects from the DB
+ * 5. For each scrum project:
  *    - Sync epics (Phase 3a)
  *    - Fetch and persist status map (Phase 3b)
- *    - For Scrum: fetch backlog count, sync sprints + issues per sprint
- *    - For Kanban: fetch backlog, fetch board items via kanbanId, sync issues
- * 6. Print rate limiter summary on completion
+ *    - Fetch backlog count and sync backlog issues
+ *    - For each active sprint: upsert sprint data, sync issues, record burndown snapshot
+ *    - Mark stale sprints as completed or delete them
+ *    - Refresh completed sprints one last time for final issue counts
+ *    - Persist project-level status breakdown and groups
+ * 6. For each kanban project:
+ *    - Sync epics (Phase 3a)
+ *    - Fetch and persist status map (Phase 3b)
+ *    - Fetch backlog items and sync backlog issues
+ *    - Find kanban board sprint (type=[7]) and sync board items
+ *    - Store full status breakdown and groups in Project for analytics
+ * 7. Print rate limiter summary on completion
  * 
- * **Rate Limiting**: Critical! All Zoho API calls are throttled. This function
- * coordinates throttle waits across multiple projects to avoid exceeding the 25 req/min limit.
- * See src/services/rateLimiter.ts for details.
+ * **Rate Limiting**: Critical! All Zoho API calls are throttled via `zohoThrottle`.
+ * This function coordinates throttle waits across multiple projects to avoid exceeding
+ * the 25 req/min limit per label. See `src/services/rateLimiter.ts` for details.
  * 
  * **Idempotency**: Safe to run multiple times. Uses Prisma upserts with unique keys
  * (zohoId + projectZohoId for epics/issues, zohoId for sprints). Unchanged data is not
  * overwritten; only new/modified records are updated.
  * 
- * **Cron Schedule**: Runs automatically every 3 hours at minute 0 (midnight, 3am, etc.)
+ * **Error Handling**: Failures on individual projects are caught and logged but do not
+ * stop the sync. Other projects continue processing. Partial data is acceptable — the
+ * next sync run will pick up where the last one left off.
  * 
- * **Error Handling**: Continues with partial data if some projects fail. Errors logged to console
- * but don't stop the overall sync process.
+ * **Cron Schedule**: Runs automatically every 3 hours at minute 0 (midnight, 3am, 6am, etc.)
  * 
- * **Return**: Number of sprints successfully synced (both scrum and kanban projects).
+ * @returns The total number of sprints successfully synced across all projects
  */
 export async function syncAll(): Promise<number> {
   clearZohoCache();      // Ensure fresh status maps on this sync run
@@ -1491,9 +1594,25 @@ export async function syncAll(): Promise<number> {
 export const syncSprintHealth = syncAll;
 
 /**
- * Full sync: projects + sprints, wrapped with startSync/completeSync
- * so the progress bar has correct totalRequests and the in-progress
- * flag is set/cleared properly.
+ * Full synchronization wrapper that tracks sync state for the UI progress bar.
+ * 
+ * This function wraps `syncAll()` with lifecycle hooks that manage the sync status
+ * record in the database. It sets the sync as "in-progress" before starting, updates
+ * the last-synced timestamp after completion, and records the total API requests sent
+ * to Zoho (for rate limit monitoring).
+ * 
+ * **Usage**: This is the preferred entry point for manual sync triggers from the
+ * dashboard UI, as it provides proper progress tracking. The cron scheduler uses
+ * `syncAll` directly since it doesn't need UI progress updates.
+ * 
+ * **Lifecycle**:
+ * 1. `startSync()` — marks sync as in-progress, resets progress bar state
+ * 2. `syncAll()` — performs the actual data synchronization
+ * 3. `touchLastSyncedAt()` — updates the timestamp of the last successful sync
+ * 4. `completeSync(sent)` — marks sync as complete with total API request count
+ * 
+ * @returns The total number of sprints successfully synced (same as `syncAll()`)
+ * @see syncAll - The underlying sync logic without lifecycle tracking
  */
 export async function runFullSync(): Promise<number> {
   await startSync();

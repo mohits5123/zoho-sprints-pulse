@@ -23,9 +23,11 @@ const router = Router();
  */
 router.get('/', async (_req, res) => {
   try {
+    // Returns null when the system has never completed a sync
     const lastSyncedAt = await getLastSyncedAt();
     res.json({ lastSyncedAt });
   } catch (err) {
+    // Guard against non-Error objects thrown via `throw 'string'`
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('❌ Sync status read failed:', msg);
     res.status(500).json({ error: 'Failed to read sync status' });
@@ -44,9 +46,11 @@ router.get('/', async (_req, res) => {
  */
 router.get('/progress', async (_req, res) => {
   try {
+    // Returns snapshot of current in-progress sync or idle state if no sync is running
     const progress = await getSyncProgress();
     res.json(progress);
   } catch (err) {
+    // Guard against non-Error objects thrown via `throw 'string'`
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('❌ Sync progress read failed:', msg);
     res.status(500).json({ error: 'Failed to read sync progress' });

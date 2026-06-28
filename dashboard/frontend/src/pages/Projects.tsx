@@ -17,6 +17,12 @@
  * - Projects are fetched from local SQLite (served by backend)
  * - Board type changes are persisted via API (fire-and-forget)
  * - Hidden projects are stored locally and synced on next full sync
+ *
+ * Navigation:
+ * - Clicking a sprint row navigates to `/board/<zohoId>?sprintId=<sprintId>`
+ * - Clicking the backlog row navigates to `/backlog/<zohoId>`
+ * - Clicking a kanban board row navigates to `/board/<zohoId>` (no sprint filter)
+ * - "Back" button navigates to `/`
  */
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -38,6 +44,7 @@ type BoardType = (typeof BOARD_TYPES)[number];
 /**
  * Color mapping for board types.
  * Used to visually distinguish scrum (blue), kanban (green), and other (gray) boards.
+ * These colors appear as dots next to the board type selector dropdown.
  */
 const BOARD_TYPE_COLORS: Record<BoardType, string> = {
   scrum:  '#3b82f6',
@@ -46,10 +53,24 @@ const BOARD_TYPE_COLORS: Record<BoardType, string> = {
 };
 
 
+/**
+ * Extracts the first letter of each word from a full name and joins them,
+ * producing a 1–2 character abbreviation used in project avatars.
+ *
+ * @param name - Full name string (e.g. "John Doe")
+ * @returns Uppercase initials (e.g. "JD")
+ */
 function initials(name: string) {
   return name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 }
 
+/**
+ * Generates a deterministic avatar background color from a project name.
+ * Uses a simple hash so the same project always gets the same color.
+ *
+ * @param name - Project name used as the hash seed
+ * @returns One of 7 predefined hex color codes
+ */
 function avatarColor(name: string) {
   const colors = ['#6366f1', '#8b5cf6', '#ec4899', '#14b8a6', '#f59e0b', '#3b82f6', '#10b981'];
   let hash = 0;
@@ -57,8 +78,20 @@ function avatarColor(name: string) {
   return colors[Math.abs(hash) % colors.length];
 }
 
+/**
+ * Hex color codes used to visually label backlog item groups in sprint rows.
+ */
 const GROUP_COLORS = { todo: '#64748b', doing: '#3b82f6', done: '#22c55e' };
 
+/**
+ * Computes the count of items in each status group (todo/doing/done) for a sprint.
+ *
+ * Parses `statusBreakdown` (status → count mapping) and `rawData` (status → group mapping)
+ * from the sprint's stored JSON strings, then aggregates counts per group.
+ *
+ * @param sp - Sprint object containing `statusBreakdown` and `rawData` JSON strings
+ * @returns Object with keys `todo`, `doing`, `done` and their respective item counts
+ */
 function sprintGroupCounts(sp: { statusBreakdown: string | null; rawData: string | null }) {
   const counts = { todo: 0, doing: 0, done: 0 };
   try {
@@ -73,6 +106,15 @@ function sprintGroupCounts(sp: { statusBreakdown: string | null; rawData: string
   return counts;
 }
 
+/**
+ * Computes the count of items in each status group (todo/doing/done) for a kanban board.
+ *
+ * Parses `statusBreakdown` (status → count mapping) and `statusGroups` (status → group mapping)
+ * from the project's stored JSON strings, then aggregates counts per group.
+ *
+ * @param project - Project object containing `statusBreakdown` and `statusGroups` JSON strings
+ * @returns Object with keys `todo`, `doing`, `done` and their respective item counts
+ */
 function kanbanGroupCounts(project: Project) {
   const counts = { todo: 0, doing: 0, done: 0 };
   try {
@@ -86,6 +128,18 @@ function kanbanGroupCounts(project: Project) {
   return counts;
 }
 
+/**
+ * Renders a single project card with its board type selector, sprint/board info,
+ * and backlog count. Supports drag-and-drop reordering and a dropdown menu for hiding.
+ *
+ * Props:
+ * - `project`: The project data to display
+ * - `isDragging` / `isDropTarget`: Visual feedback for drag-and-drop operations
+ * - `onBoardTypeChange`: Callback when the user changes the board type
+ * - `onHide`: Callback when the user hides the project via the menu
+ * - `onNavigate`: Callback for navigation to sprint, backlog, or board views
+ * - Drag-and-drop handlers: Wired to the parent's DnD state
+ */
 function ProjectCard({
   project, isDragging, isDropTarget, onBoardTypeChange, onHide, onNavigate,
   onDragStart, onDragOver, onDrop, onDragEnd,
@@ -305,6 +359,22 @@ function ProjectCard({
   );
 }
 
+/**
+ * Main page component that renders the full list of projects.
+ *
+ * Responsibilities:
+ * 1. Fetches all projects and the last-sync timestamp on mount
+ * 2. Provides actions for resyncing, hiding/unhiding, and reordering projects
+ * 3. Renders visible projects in a responsive grid with drag-and-drop support
+ * 4. Renders a collapsible "Hidden projects" section for unhiding
+ * 5. Displays a footer with the last sync timestamp
+ *
+ * State management:
+ * - `projects`: Array of all projects (visible + hidden), kept in display order
+ * - `dragIndex` / `dropTarget`: Refs/state for tracking drag-and-drop position
+ * - `hiddenOpen`: Controls visibility of the hidden projects section
+ * - `loading` / `syncing` / `error`: UI state for async operations
+ */
 export function Projects() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -326,6 +396,10 @@ export function Projects() {
     fetchSyncStatus().then(({ lastSyncedAt: ts }) => setLastSyncedAt(ts)).catch(() => {});
   }, []);
 
+  /**
+   * Triggers a full sync with Zoho Sprints, then refreshes the project list
+   * and the last-sync timestamp. Resets any previous errors.
+   */
   async function handleResync() {
     setSyncing(true);
     setError(null);
@@ -340,6 +414,12 @@ export function Projects() {
     }
   }
 
+  /**
+   * Marks a project as hidden: optimistically updates local state, then
+   * persists to the backend. Reverts on failure.
+   *
+   * @param id - The Zoho project ID to hide
+   */
   async function handleHide(id: string) {
     setProjects((prev) => prev.map((p) => p.zohoId === id ? { ...p, hidden: true } : p));
     await updateProjectDisplay(id, { hidden: true }).catch(() => {
@@ -347,6 +427,12 @@ export function Projects() {
     });
   }
 
+  /**
+   * Unhides a project: optimistically updates local state, then
+   * persists to the backend. Reverts on failure.
+   *
+   * @param id - The Zoho project ID to unhide
+   */
   async function handleUnhide(id: string) {
     setProjects((prev) => prev.map((p) => p.zohoId === id ? { ...p, hidden: false } : p));
     await updateProjectDisplay(id, { hidden: false }).catch(() => {
@@ -354,10 +440,23 @@ export function Projects() {
     });
   }
 
+  /**
+   * Records which project index is being dragged.
+   *
+   * @param _e - The drag event (unused)
+   * @param index - Index of the dragged project in the visible list
+   */
   function handleDragStart(_e: React.DragEvent, index: number) {
     dragIndex.current = index;
   }
 
+  /**
+   * Updates the drop target index while dragging. Prevents default to allow drop.
+   * Only sets a drop target if the cursor is over a different card.
+   *
+   * @param e - The drag-over event
+   * @param index - Index of the card being hovered over
+   */
   function handleDragOver(e: React.DragEvent, index: number) {
     e.preventDefault();
     if (dragIndex.current !== null && dragIndex.current !== index) {
@@ -365,6 +464,13 @@ export function Projects() {
     }
   }
 
+  /**
+   * Reorders visible projects by moving the dragged project to the drop target position.
+   * Updates `displayOrder` for each visible project and persists the new order
+   * to the backend (fire-and-forget). Hidden projects are not reordered.
+   *
+   * @param dropIndex - The index in the visible list where the dragged project should land
+   */
   function handleDrop(dropIndex: number) {
     const fromIndex = dragIndex.current;
     if (fromIndex === null || fromIndex === dropIndex) return;
@@ -385,6 +491,9 @@ export function Projects() {
     setDropTarget(null);
   }
 
+  /**
+   * Cleans up drag-and-drop state when the drag operation ends (drop or cancel).
+   */
   function handleDragEnd() {
     dragIndex.current = null;
     setDropTarget(null);
@@ -469,6 +578,12 @@ export function Projects() {
   );
 }
 
+/**
+ * Inline style definitions for the Projects page.
+ *
+ * Organized by UI section: page layout, header, cards, sprints, hidden section.
+ * All values are hardcoded for consistent dark-mode theming across the dashboard.
+ */
 const s: Record<string, React.CSSProperties> = {
   page: {
     minHeight: '100vh',

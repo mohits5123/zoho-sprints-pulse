@@ -4,7 +4,13 @@ import { config } from '../config';
 import prisma from '../db/client';
 import { zohoThrottle } from './rateLimiter';
 
-/** Zoho project with metadata. */
+/**
+ * Represents a Zoho project with normalized metadata stored in our database.
+ *
+ * This interface mirrors the shape of records in the `Project` Prisma model.
+ * Fields like `description` and `prefix` may be null since Zoho's API does not
+ * always return them.
+ */
 export interface ZohoProject {
   zohoId: string;        // Unique Zoho project ID
   name: string;          // Project display name
@@ -17,7 +23,19 @@ export interface ZohoProject {
   rawData: string;        // JSON blob of raw response for debugging/replay
 }
 
-/** Zoho project status codes mapped to human-readable values. */
+/**
+ * Maps Zoho's integer status codes to human-readable status strings.
+ *
+ * Zoho Projects returns status as a number; this table translates it
+ * into one of four canonical values used throughout the app.
+ *
+ * | Code | Status   | Meaning                                       |
+ * |------|----------|-----------------------------------------------|
+ * | 1    | active   | Currently active project                      |
+ * | 2    | inactive | Temporarily inactive (not archived)           |
+ * | 3    | archived | Project has been archived, no new work        |
+ * | 4    | template | Reusable template project                     |
+ */
 const PROJECT_STATUS_MAP: Record<number, string> = {
   1: 'active',      // Currently active project
   2: 'inactive',    // Temporarily inactive (not archived)
@@ -29,8 +47,14 @@ const PROJECT_STATUS_MAP: Record<number, string> = {
 const SETTINGS_KEY_TEAM_ID = 'zoho_team_id';
 
 /**
- * Resolve the organization/team ID from Settings cache.
- * Throws if not found (requires user sync to run first).
+ * Resolve the organization/team ID from the Settings cache table.
+ *
+ * This value is written during the initial user sync and is required
+ * to construct the Zoho API URL for fetching projects.
+ *
+ * @throws {Error} If the team ID has not been bootstrapped yet.
+ *                 Call the user sync routine first.
+ * @returns The team/organization ID as a string.
  */
 async function resolveTeamId(): Promise<string> {
   const cached = await prisma.settings.findUnique({ where: { key: SETTINGS_KEY_TEAM_ID } });
@@ -40,11 +64,25 @@ async function resolveTeamId(): Promise<string> {
 }
 
 /**
- * Fetch all projects from Zoho and upsert to database.
- * Uses pagination with 100 projects per request.
- * 
- * Projects are upserted by zohoId — only metadata changes (name, status, owner).
- * This is a top-level project list that doesn't include sprints/epics/issues.
+ * Fetch all projects from Zoho's API and return them as normalized `ZohoProject` objects.
+ *
+ * This function handles:
+ * - Authentication via the cached access token from `zohoAuth`.
+ * - Pagination through all projects (100 per page) using Zoho's `index` and `range` params.
+ * - Rate-limiting via `zohoThrottle` to stay within Zoho's API quotas.
+ * - Field-index resolution from `project_prop`, which varies per organization.
+ * - Owner name lookup using the `userDisplayName` map from Zoho's response.
+ *
+ * Notes:
+ * - `description` is always `null` because Zoho's `allprojects` endpoint does not
+ *   return it. To get descriptions you would need to call the individual project
+ *   detail endpoint (not done here for performance).
+ * - Archived projects are included because the `action=allprojects` parameter
+ *   is used instead of `action=activeprojects`.
+ * - Sprints, epics, and issues are NOT fetched; this is a top-level project list only.
+ *
+ * @returns An array of all projects belonging to the organization's Zoho team.
+ * @throws {Error} If the team ID is missing from the Settings cache.
  */
 export async function fetchZohoProjects(): Promise<ZohoProject[]> {
   const token  = getAccessToken();
@@ -136,10 +174,20 @@ export async function fetchZohoProjects(): Promise<ZohoProject[]> {
 }
 
 /**
- * Sync Zoho projects to database.
- * Fetches from Zoho and upserts all active/inactive/archived/template projects.
- * 
- * @returns Number of projects synced (upserted)
+ * Sync Zoho projects to the local database.
+ *
+ * This is the main entry point for keeping project metadata in sync. It:
+ * 1. Calls `fetchZohoProjects()` to retrieve and normalize all projects from Zoho.
+ * 2. Upserts each project into the `Project` Prisma model by `zohoId`.
+ *    - On update, only overwrites fields that come from Zoho (preserving any
+ *      custom/local fields that may have been added).
+ *    - On create, populates all fields from the Zoho response.
+ *
+ * This function is idempotent — calling it multiple times with the same Zoho
+ * state will produce no net changes after the first sync.
+ *
+ * @returns The number of projects that were fetched and upserted.
+ *          Returns `0` if no projects were returned by Zoho.
  */
 export async function syncZohoProjects(): Promise<number> {
   const zohoProjects = await fetchZohoProjects();

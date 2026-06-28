@@ -15,6 +15,8 @@
  * Data flows:
  * - Sprint data fetched from local SQLite (served by backend)
  * - Sync is fire-and-forget; backend returns immediately, frontend polls for completion
+ *
+ * @module SprintHealth
  */
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -23,6 +25,26 @@ import { SprintCard } from '../components/SprintCard';
 import { LastSyncedFooter } from '../components/LastSyncedFooter';
 import { useSyncProgress } from '../contexts/SyncProgressContext';
 
+/**
+ * SprintHealth page component.
+ *
+ * Renders a dashboard view of all sprints across scrum projects, organized into
+ * "Active Sprints" and "Past Sprints" sections. Supports syncing from Zoho,
+ * loading historical sprint data, and hiding/showing individual sprint cards.
+ *
+ * State management:
+ * - `sprints`: Current sprint data (fetched from backend on mount and after sync)
+ * - `lastSyncedAt`: Timestamp of the most recent successful sync, used to detect
+ *   when a background sync has completed (polling compares against this value)
+ * - `hiddenOpen`: Toggle for the collapsible "Hidden sprints" section
+ * - Modal state (`showPastModal`, `selectedProject`, `selectedPastSprints`):
+ *   Controls the "Load Past Sprints" modal flow: select project → select sprints → fetch
+ *
+ * Side effects:
+ * - On mount: fetches sprints and sync status; cleans up polling interval on unmount
+ * - On sync: starts a 5-second polling loop that checks `lastSyncedAt` to detect
+ *   completion of the background sync operation
+ */
 export function SprintHealth() {
   const navigate = useNavigate();
   const { setSyncActive } = useSyncProgress();
@@ -45,6 +67,13 @@ export function SprintHealth() {
   const [fetchingPast, setFetchingPast] = useState(false);
   const [hiddenOpen, setHiddenOpen] = useState(false);
 
+  /**
+   * Formats a date string for display.
+   *
+   * @param dateStr - ISO date string to format, or null
+   * @returns Human-readable date (e.g. "Jan 15, 2025"), or "No date" if null,
+   *          or the raw string if parsing fails
+   */
   function formatDate(dateStr: string | null): string {
     if (!dateStr) return 'No date';
     const d = new Date(dateStr);
@@ -52,6 +81,7 @@ export function SprintHealth() {
     return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   }
 
+  // Mount: load sprints and sync status; clean up polling interval on unmount.
   useEffect(() => {
     fetchSprints()
       .then((d) => setSprints(d.sprints))
@@ -61,6 +91,14 @@ export function SprintHealth() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
+  /**
+   * Hides a sprint card in the UI and persists the preference to the backend.
+   *
+   * Optimistic update: marks the sprint as hidden locally first, then rolls back
+   * if the backend call fails.
+   *
+   * @param id - The Zoho sprint ID to hide
+   */
   async function handleHide(id: string) {
     setSprints((prev) => prev.map((sp) => sp.zohoId === id ? { ...sp, hidden: true } : sp));
     await updateSprintDisplay(id, { hidden: true }).catch(() => {
@@ -68,6 +106,14 @@ export function SprintHealth() {
     });
   }
 
+  /**
+   * Restores a previously hidden sprint card in the UI and persists the change.
+   *
+   * Optimistic update: marks the sprint as visible locally first, then rolls back
+   * if the backend call fails.
+   *
+   * @param id - The Zoho sprint ID to unhide
+   */
   async function handleUnhide(id: string) {
     setSprints((prev) => prev.map((sp) => sp.zohoId === id ? { ...sp, hidden: false } : sp));
     await updateSprintDisplay(id, { hidden: false }).catch(() => {
@@ -75,6 +121,12 @@ export function SprintHealth() {
     });
   }
 
+  /**
+   * Opens the "Load Past Sprints" modal and loads the list of projects.
+   *
+   * Resets all modal-related state to a clean initial state before fetching
+   * the project list from the backend.
+   */
   async function handleLoadPast() {
     setShowPastModal(true);
     setLoadingProjects(true);
@@ -91,6 +143,13 @@ export function SprintHealth() {
     }
   }
 
+  /**
+   * Loads the list of past sprint names for a selected project.
+   *
+   * Clears any previously selected past sprints when switching projects.
+   *
+   * @param projectId - The Zoho project ID whose past sprints to load
+   */
   async function handleProjectSelect(projectId: string) {
     setSelectedProject(projectId);
     setSelectedPastSprints(new Set());
@@ -106,6 +165,14 @@ export function SprintHealth() {
     }
   }
 
+  /**
+   * Toggles the selection of a past sprint in the modal.
+   *
+   * Uses functional state update to create a new Set, ensuring React
+   * detects the state change immutably.
+   *
+   * @param zohoId - The Zoho sprint ID to toggle
+   */
   function togglePastSprint(zohoId: string) {
     setSelectedPastSprints(prev => {
       const next = new Set(prev);
@@ -118,6 +185,14 @@ export function SprintHealth() {
     });
   }
 
+  /**
+   * Fetches historical data for all selected past sprints, then refreshes the
+   * main sprint list and closes the modal.
+   *
+   * Iterates over selected sprint IDs sequentially (not in parallel) to avoid
+   * overwhelming the backend. After all fetches complete, re-fetches the full
+   * sprint list so the dashboard reflects the newly loaded data.
+   */
   async function handleFetchSelected() {
     if (selectedPastSprints.size === 0) return;
     setFetchingPast(true);
@@ -138,6 +213,21 @@ export function SprintHealth() {
     }
   }
 
+  /**
+   * Initiates a full sync of sprint data from Zoho.
+   *
+   * Sync flow:
+   * 1. Calls `syncSprints()` which returns immediately (fire-and-forget)
+   * 2. Starts polling `fetchSyncStatus()` every 5 seconds
+   * 3. Compares the returned `lastSyncedAt` against the value captured before sync;
+   *    when it changes, the sync is considered complete
+   * 4. Re-fetches the full sprint list and updates UI state
+   *
+   * The polling interval is stored in `pollRef` so it can be cleared on unmount.
+   *
+   * @param err.message - Error detail on failure, or a generic message if the error
+   *                      is not an `Error` instance
+   */
   async function handleSync() {
     setSyncing(true);
     setError(null);
@@ -166,6 +256,7 @@ export function SprintHealth() {
     }
   }
 
+  // Categorize sprints for rendering: visible vs. hidden, active vs. past.
   const visibleSprints = sprints.filter(sp => !sp.hidden);
   const hiddenSprints = sprints.filter(sp => sp.hidden);
   const activeSprints = visibleSprints.filter(sp => sp.status === 'active');
@@ -348,6 +439,16 @@ export function SprintHealth() {
   );
 }
 
+/**
+ * Computes a deterministic background color for a sprint avatar based on its name.
+ *
+ * Uses a simple hash of the name characters to pick from a fixed palette of
+ * 8 colors. Same name always produces the same color, enabling visual consistency
+ * across renders.
+ *
+ * @param name - The sprint name to hash
+ * @returns A hex color string from the palette
+ */
 function avatarColor(name: string): string {
   const colors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#06b6d4', '#ef4444', '#6366f1'];
   let hash = 0;
@@ -357,6 +458,15 @@ function avatarColor(name: string): string {
   return colors[Math.abs(hash) % colors.length];
 }
 
+/**
+ * Extracts the first two initials from a sprint name.
+ *
+ * Splits the name on whitespace, takes the first character of each word,
+ * takes the first two characters, and uppercases them.
+ *
+ * @param name - The sprint name (e.g. "Sprint One" → "SO")
+ * @returns Uppercase initials string (e.g. "SO")
+ */
 function initials(name: string): string {
   return name
     .split(' ')
@@ -366,6 +476,12 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
+/**
+ * Inline style definitions for the SprintHealth page.
+ *
+ * Uses a flat object keyed by semantic name (e.g. "page", "header", "grid")
+ * with values typed as React.CSSProperties for type-safe inline styles.
+ */
 const s: Record<string, React.CSSProperties> = {
   page: {
     minHeight: '100vh',

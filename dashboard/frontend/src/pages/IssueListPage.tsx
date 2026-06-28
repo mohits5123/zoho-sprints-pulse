@@ -10,13 +10,6 @@
  * - Click to open in Zoho Sprints (if URL available)
  * - Copy issue ID or Zoho URL to clipboard
  * - Dynamic title based on filter context (e.g., "Stale tickets", "John's issues")
- *
- * Features:
- * - Issue list with columns: ID, Title, Status, Creator, Assignee, Created, Delayed/Age
- * - Filters via URL query parameters (sprintId, status, statusGroup, userId, stale, staleDays, etc.)
- * - Click to open in Zoho Sprints (if URL available)
- * - Copy issue ID or Zoho URL to clipboard
- * - Dynamic title based on filter context (e.g., "Stale tickets", "John's issues")
  * - Staleness calculation: age in days, highlighted red if over threshold and in watched state
  * - Watched states: by default all non-done statuses; can be customized per project
  *
@@ -29,8 +22,21 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { fetchIssues, fetchIssuesKanban, fetchProject, fetchAppConfig, type IssueItem } from '../api/client';
 import { UserAvatar } from '../components/UserAvatar';
 
+/**
+ * Represents the high-level grouping of an issue's workflow state.
+ *
+ * - `todo`:   Issues not yet started (e.g. "New", "Open")
+ * - `doing`:  Issues actively being worked on (e.g. "In Progress")
+ * - `done`:   Issues completed (e.g. "Done", "Closed")
+ * - `unknown`: Any status that doesn't map to the above groups
+ */
 type StatusGroup = 'todo' | 'doing' | 'done' | 'unknown';
 
+/**
+ * Color mapping for status groups, used for the status-dot indicator in each row.
+ *
+ * These are muted slate/blue/green tones chosen for a dark theme.
+ */
 const GROUP_COLORS: Record<string, string> = {
   todo:    '#64748b',
   doing:   '#3b82f6',
@@ -38,6 +44,13 @@ const GROUP_COLORS: Record<string, string> = {
   unknown: '#94a3b8',
 };
 
+/**
+ * Formats an ISO 8601 date string into a short locale-aware date (en-IN).
+ *
+ * @param iso - ISO date string to format; may be `null`
+ * @returns A human-readable date like `"28 Jun 25"`, or `"—"` if the input is
+ *          falsy or unparseable
+ */
 function fmtDate(iso: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -45,6 +58,25 @@ function fmtDate(iso: string | null): string {
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' });
 }
 
+/**
+ * Renders a filtered, paginated list of issues for a given project.
+ *
+ * Reads filter parameters from the URL query string (`sprintId`, `status`,
+ * `statusGroup`, `userId`, `stale`, etc.) and fetches matching issues from the
+ * backend. The fetch strategy differs by board type:
+ * - **Kanban** boards: issues are fetched without a sprint scope.
+ * - **Scrum** boards:  issues are fetched within a specific sprint.
+ *
+ * Issues are sorted by status group (`todo` → `doing` → `done`). The page
+ * title and subtitle are derived from the active filters so that a URL like
+ * `?stale=true&staleDays=14` produces the heading *"Stale tickets (14+ days)"*.
+ *
+ * **Rendering states:**
+ * 1. *Loading* — shown while data is being fetched from the backend.
+ * 2. *Error*    — shown when a fetch call rejects.
+ * 3. *Empty*    — shown when the query returns zero results.
+ * 4. *List*     — the full issue table with sortable columns and per-row actions.
+ */
 export function IssueListPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams] = useSearchParams();
@@ -56,6 +88,8 @@ export function IssueListPage() {
   const statusGroup = searchParams.get('statusGroup') ?? undefined;
   const userId     = searchParams.get('userId')       ?? undefined;
   const userName   = searchParams.get('userName')     ?? '';
+  // `stale=true` narrows results to issues whose age exceeds `staleDays`
+  // (default 7). When `creatorOnly=true` only issues created by `userId` are shown.
   const stale      = searchParams.get('stale') === 'true';
   const staleDays  = parseInt(searchParams.get('staleDays') ?? '7', 10) || 7;
   const creatorOnly = searchParams.get('creatorOnly') === 'true';
@@ -112,6 +146,13 @@ export function IssueListPage() {
     }
   }, [projectId, sprintId, boardType, status, epicId, userId, creatorOnly, stale, staleDays]);
 
+  /**
+   * Copies a URL or issue ID to the clipboard and shows a brief "copied"
+   * indicator on the corresponding row.
+   *
+   * @param url - The text to copy (a full Zoho Sprints URL or a fallback `#<itemNo>`)
+   * @param itemNo - The issue's item number, used as a key to clear the indicator
+   */
   function copyItemUrl(url: string, itemNo: string) {
     navigator.clipboard.writeText(url).then(() => {
       setCopied(itemNo);
@@ -187,6 +228,33 @@ export function IssueListPage() {
   );
 }
 
+/**
+ * Renders a single row inside the issue list table.
+ *
+ * Each row displays the issue's ID, title, status dot, creator avatar,
+ * assignee avatars, created date, and (when applicable) age in days.
+ *
+ * **Interactions:**
+ * - *Hover* — highlights the row background and reveals the copy button.
+ * - *Click* — opens the Zoho Sprints detail page in a new tab (if a URL is available).
+ * - *Copy button* — copies the Zoho URL (or a fallback `#<itemNo>`) to the clipboard.
+ *
+ * **Staleness logic:**
+ * An issue's age is displayed only when its status is considered "watched".
+ * By default every non-done status is watched; if the project has custom
+ * `watchedStates` configured then only statuses in that list are watched.
+ * When the age exceeds `staleDays` and the state is watched, the age is
+ * shown in red with bold weight to draw attention to stale work.
+ *
+ * @param issue - The issue record to render
+ * @param staleDays - Age threshold in days; values above this are flagged as stale
+ * @param watchedStates - List of status strings considered "watched". Empty array
+ *                        means the default rule (non-done = watched) applies
+ * @param workspaceName - Zoho Sprints workspace slug, used to build the detail URL
+ * @param projNo - Project number, used to build the detail URL
+ * @param copied - The `itemNo` of the row that was most recently copied (for UI feedback)
+ * @param onCopy - Callback invoked when the user clicks the copy button
+ */
 function IssueRow({
   issue,
   staleDays,
@@ -297,6 +365,13 @@ function IssueRow({
   );
 }
 
+/**
+ * Inline style objects for the issue list page.
+ *
+ * All styles are hand-written (no CSS framework) and tuned for a dark
+ * slate background (`#0f172a`). The layout is a flex-based table with
+ * fixed-width columns for ID, status, dates, and staleness.
+ */
 const s: Record<string, React.CSSProperties> = {
   page: {
     minHeight: '100vh', backgroundColor: '#0f172a', color: '#e2e8f0',

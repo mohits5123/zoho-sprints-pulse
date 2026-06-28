@@ -4,6 +4,9 @@
  * This router serves all dashboard API endpoints. Routes are mounted with
  * path prefixes and automatically proxy to their respective route handlers.
  * All routes use the rate limiter (Zoho API) and read from SQLite database.
+ *
+ * Route order matters: more specific paths (e.g., `/sprints/:sprintZohoId/burndown`)
+ * are mounted after their parent (`/sprints`) to ensure Express matches them first.
  */
 
 import { Router } from 'express';
@@ -55,7 +58,11 @@ router.use('/config', appConfigRouter);
 router.use('/sync', syncStatusRouter);
 
 /**
- * Mount burndown endpoint at /api/sprints/:sprintZohoId/burndown - fetch or seed burndown data
+ * Mount burndown endpoint at /api/sprints/:sprintZohoId/burndown - fetch or seed burndown data.
+ *
+ * NOTE: This must be mounted before `/sprints` to ensure Express matches the more specific
+ * path first, since `/sprints/:sprintZohoId/burndown` would otherwise be captured by the
+ * parent `/sprints` router.
  */
 router.use('/sprints/:sprintZohoId/burndown', burndownRouter);
 

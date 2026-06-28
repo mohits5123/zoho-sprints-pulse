@@ -95,10 +95,14 @@ interface StaleManagerModalProps {
 export function StaleManagerModal({ projectId, statusGroups, config, onSave, onClose }: StaleManagerModalProps) {
   const [days, setDays] = useState(String(config.days));
 
-  // If no states were previously saved, default to all non-done states
-  /** Default watched states: all non-done statuses if none previously saved */
+  // If no states were previously saved, default to all non-done states.
+  // This ensures the user always has a sensible default: every non-done
+  // status is monitored for staleness unless they've explicitly chosen otherwise.
   const defaultWatched = () => {
+    // If the user has previously saved a watched set, reuse it (avoids
+    // resetting to defaults on every mount when config already has values).
     if (config.watchedStates.length > 0) return new Set(config.watchedStates);
+    // Otherwise derive defaults: all statuses whose group is not "done".
     return new Set(
       Object.entries(statusGroups)
         .filter(([, g]) => g !== 'done')
@@ -107,8 +111,9 @@ export function StaleManagerModal({ projectId, statusGroups, config, onSave, onC
   };
   const [watched, setWatched] = useState<Set<string>>(defaultWatched);
 
-  /** Group statuses by their bucket (todo/doing/done/unknown) */
-  // Group statuses
+  // Group statuses by their bucket (todo / doing / done / unknown).
+  // Any group name not in GROUP_ORDER is mapped to 'unknown' to keep the
+  // display order stable and to avoid rendering unexpected buckets.
   const grouped: Record<string, string[]> = {};
   for (const [name, group] of Object.entries(statusGroups)) {
     const g = GROUP_ORDER.includes(group as typeof GROUP_ORDER[number]) ? group : 'unknown';
@@ -125,18 +130,33 @@ export function StaleManagerModal({ projectId, statusGroups, config, onSave, onC
     });
   }
 
-  /** Save configuration to localStorage and notify parent */
+  /**
+   * Persist the current configuration to localStorage and notify the parent
+   * component so it can react to the change (e.g. refresh the dashboard view).
+   *
+   * Validation: days is clamped to a minimum of 1; invalid / empty input
+   * falls back to the default of 7 days.
+   */
   function handleSave() {
+    // Coerce the string input to an integer, enforcing a floor of 1 day
+    // and a fallback to 7 on parse failure.
     const parsedDays = Math.max(1, parseInt(days, 10) || 7);
     const cfg: StaleConfig = { days: parsedDays, watchedStates: Array.from(watched) };
     saveStaleConfig(projectId, cfg);
     onSave(cfg);
   }
 
-  /** Select all states in a group, or all non-done states if no group specified */
+ /**
+   * Select every state in the given group, or every non-done state when no
+   * group is specified. Uses functional state update to avoid stale closures.
+   * Note: the "done" group is never included because done statuses are
+   * permanently excluded from stale detection by design.
+   */
   function selectAll(group?: string) {
     setWatched(prev => {
       const next = new Set(prev);
+      // When a group is provided, select only statuses in that group;
+      // otherwise select all non-done statuses across every group.
       const names = group
         ? (grouped[group] ?? [])
         : Object.keys(statusGroups).filter(n => statusGroups[n] !== 'done');
@@ -145,10 +165,15 @@ export function StaleManagerModal({ projectId, statusGroups, config, onSave, onC
     });
   }
 
-  /** Clear all states in a group, or all states if no group specified */
+/**
+   * Deselect every state in the given group, or all states when no group is
+   * specified. Uses functional state update to avoid stale closures.
+   */
   function clearAll(group?: string) {
     setWatched(prev => {
       const next = new Set(prev);
+      // When a group is provided, clear only statuses in that group;
+      // otherwise clear every status across all groups.
       const names = group ? (grouped[group] ?? []) : Object.keys(statusGroups);
       names.forEach(n => next.delete(n));
       return next;
@@ -156,7 +181,9 @@ export function StaleManagerModal({ projectId, statusGroups, config, onSave, onC
   }
 
   return (
+    // Clicking the overlay (but not the modal itself) closes the modal.
     <div style={s.overlay} onClick={onClose}>
+      // Prevent the click from bubbling to the overlay when clicking inside the modal.
       <div style={s.modal} onClick={e => e.stopPropagation()}>
 
         {/* Header */}
@@ -169,14 +196,16 @@ export function StaleManagerModal({ projectId, statusGroups, config, onSave, onC
         <div style={s.section}>
           <label style={s.sectionLabel}>Mark ticket as stale after</label>
           <div style={s.daysRow}>
-            <input
-              type="number"
-              min={1}
-              max={365}
-              value={days}
-              onChange={e => setDays(e.target.value)}
-              style={s.daysInput}
-            />
+             // Number input constrained to 1–365; out-of-range values are
+              // normalised on save via handleSave (clamped to minimum of 1).
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={days}
+                onChange={e => setDays(e.target.value)}
+                style={s.daysInput}
+              />
             <span style={s.daysUnit}>days since creation</span>
           </div>
         </div>
@@ -201,7 +230,9 @@ export function StaleManagerModal({ projectId, statusGroups, config, onSave, onC
                     <span style={s.groupLabel}>{GROUP_LABEL[group]}</span>
                     {!isDoneGroup && (
                       <div style={s.groupBulk}>
+                        // Bulk-select all statuses within this group.
                         <button style={s.tinyBtn} onClick={() => selectAll(group)}>all</button>
+                        // Bulk-deselect every status within this group.
                         <button style={s.tinyBtn} onClick={() => clearAll(group)}>none</button>
                       </div>
                     )}
@@ -221,6 +252,8 @@ export function StaleManagerModal({ projectId, statusGroups, config, onSave, onC
                       <input
                         type="checkbox"
                         checked={watched.has(name)}
+                        // Done-group statuses are permanently disabled — done tickets
+                        // are never considered stale, so they cannot be monitored.
                         disabled={isDoneGroup}
                         onChange={() => !isDoneGroup && toggleState(name)}
                         style={s.checkbox}
@@ -252,19 +285,33 @@ export function StaleManagerModal({ projectId, statusGroups, config, onSave, onC
 }
 
 /**
- * Inline styles for StaleManagerModal component
- * Configures the modal appearance for configuring stale ticket detection settings
- * Uses dark theme with accessible contrast and interactive elements
- */
+  * Inline style definitions for the StaleManagerModal.
+  *
+  * All styles use a dark slate palette (`#0f172a` base) with carefully chosen
+  * contrast ratios to ensure readability. Interactive elements (buttons, inputs,
+  * checkboxes) use `#3b82f6` blue as the accent colour, consistent with the
+  * rest of the dashboard.
+  *
+  * The modal has a fixed width of 460 px and a maximum height of 80 vh so it
+  * fits comfortably on typical screens without requiring a full-page scroll.
+  */
 const s: Record<string, React.CSSProperties> = {
-  /** Full-screen overlay for modal with semi-transparent background */
+  /**
+   * Full-screen overlay behind the modal.
+   *
+   * Uses `inset: 0` (shorthand for top/right/bottom/left: 0) to cover the
+   * entire viewport. The semi-transparent black background (`rgba(0,0,0,0.65)`)
+   * creates a dimming effect that draws focus to the modal.
+   *
+   * `zIndex: 1000` ensures it sits above all other page content.
+   */
   overlay: {
     position: 'fixed', inset: 0,
     backgroundColor: 'rgba(0,0,0,0.65)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     zIndex: 1000,
   },
-  /** Modal container with dark theme and shadow */
+  /** Main modal container — dark slate theme with rounded corners and deep shadow. */
   modal: {
     backgroundColor: '#0f172a',
     border: '1px solid #1e293b',
@@ -276,125 +323,128 @@ const s: Record<string, React.CSSProperties> = {
     boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
     overflow: 'hidden',
   },
-  /** Modal header with title and close button */
+  /** Modal header row — title on the left, close button on the right. */
   header: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     padding: '18px 20px 14px',
     borderBottom: '1px solid #1e293b',
     flexShrink: 0,
   },
-  /** Modal title */
+  /** Modal title text — bold, light colour for high contrast on dark background. */
   title: { fontSize: 15, fontWeight: 700, color: '#f1f5f9' },
-  /** Close button */
+  /** Close button (✕) — minimal styling, inherits pointer cursor. */
   closeBtn: {
     background: 'none', border: 'none', cursor: 'pointer',
     color: '#64748b', fontSize: 16, padding: '0 2px',
     lineHeight: 1,
   },
-  /** Section container */
+  /** Section wrapper — adds left/right padding and top margin. */
   section: {
     padding: '16px 20px 0',
   },
-  /** Section label text */
+  /** Section label — small, uppercase, muted colour for visual hierarchy. */
   sectionLabel: {
     fontSize: 11, fontWeight: 600, color: '#64748b',
     textTransform: 'uppercase' as const, letterSpacing: '0.06em',
     display: 'block', marginBottom: 10,
   },
-  /** Days input row */
+  /** Row containing the days number input and its unit label. */
   daysRow: {
     display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4,
   },
-  /** Days input field */
+  /** Number input for the stale-days threshold. Dark background with a
+   * subtle border; bold font makes the numeric value easy to scan. */
   daysInput: {
     width: 72, padding: '6px 10px',
     backgroundColor: '#1e293b', border: '1px solid #334155',
     borderRadius: 6, color: '#f1f5f9', fontSize: 15, fontWeight: 700,
     outline: 'none',
   },
-  /** Days unit text */
+  /** Unit text ("days since creation") next to the days input. */
   daysUnit: { fontSize: 13, color: '#94a3b8' },
-  /** States header with bulk action buttons */
+  /** States section header — label on the left, bulk-action buttons on the right. */
   statesHeader: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     marginBottom: 10,
   },
-  /** Bulk action buttons container */
+  /** Horizontal container for the "All non-done" and "Clear all" buttons. */
   bulkBtns: { display: 'flex', gap: 6 },
-  /** Bulk action button */
+  /** Bulk-action button — ghost style with a subtle border. */
   bulkBtn: {
     background: 'none', border: '1px solid #334155',
     borderRadius: 5, color: '#94a3b8', fontSize: 11,
     padding: '3px 8px', cursor: 'pointer',
   },
-  /** Scrollable states list */
+  /** Scrollable list of status groups. Max height capped at 42 vh so the
+   * modal itself stays within its 80 vh limit. */
   statesList: {
     overflowY: 'auto' as const,
     maxHeight: '42vh',
     paddingBottom: 4,
     paddingRight: 4,
   },
-  /** Status group block */
+  /** Individual group block (e.g. "To Do", "In Progress"). */
   groupBlock: {
     marginBottom: 14,
   },
-  /** Group header with dot, label, and bulk buttons */
+  /** Group header — colour dot, label text, and per-group bulk buttons. */
   groupHeader: {
     display: 'flex', alignItems: 'center', gap: 7,
     marginBottom: 6,
   },
-  /** Color dot for group */
+  /** Small colour dot indicating the group's bucket type. */
   groupDot: {
     width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
   },
-  /** Group label text */
+  /** Group label text — medium-weight, light grey for readability. */
   groupLabel: {
     fontSize: 12, fontWeight: 600, color: '#cbd5e1',
     flex: 1,
   },
-  /** Bulk action buttons for group */
+  /** Container for per-group "all / none" links. */
   groupBulk: { display: 'flex', gap: 5 },
-  /** Small underlined button */
+  /** Tiny underlined link-style button for per-group bulk actions. */
   tinyBtn: {
     background: 'none', border: 'none', cursor: 'pointer',
     color: '#475569', fontSize: 11, padding: '0 2px',
     textDecoration: 'underline',
   },
-  /** Note for done group (excluded) */
+  /** Italic note rendered next to the "Done" group to indicate exclusion. */
   doneNote: { fontSize: 11, color: '#475569', fontStyle: 'italic' },
-  /** State row with checkbox */
+  /** Row containing a checkbox, colour dot, and status name. */
   stateRow: {
     display: 'flex', alignItems: 'center', gap: 9,
     padding: '5px 8px',
     borderRadius: 6,
+    // Prevents accidental text selection while clicking checkboxes.
     userSelect: 'none' as const,
   },
-  /** Checkbox */
+  /** Checkbox input — blue accent colour matching the dashboard theme. */
   checkbox: { width: 14, height: 14, accentColor: '#3b82f6', cursor: 'pointer', flexShrink: 0 },
-  /** Color dot for state */
+  /** Small colour dot mirroring the group's colour for visual consistency. */
   stateDot: {
     width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
   },
-  /** State name text */
+  /** Status name text — light colour for contrast on dark background. */
   stateName: { fontSize: 13, color: '#e2e8f0' },
-  /** Modal footer */
+  /** Modal footer — sticky at the bottom, separated by a top border. */
   footer: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     padding: '14px 20px',
     borderTop: '1px solid #1e293b',
     flexShrink: 0,
   },
-  /** Selected states count */
+  /** Text showing how many statuses are currently selected. */
   watchCount: { fontSize: 12, color: '#475569' },
-  /** Footer buttons container */
+  /** Container for the Cancel and Save buttons. */
   footerBtns: { display: 'flex', gap: 8 },
-  /** Cancel button */
+  /** Cancel button — ghost style matching bulk buttons. */
   cancelBtn: {
     padding: '7px 16px', borderRadius: 7,
     background: 'none', border: '1px solid #334155',
     color: '#94a3b8', fontSize: 13, cursor: 'pointer',
   },
-  /** Save button */
+  /** Save button — primary blue accent for the main action. */
   saveBtn: {
     padding: '7px 18px', borderRadius: 7,
     backgroundColor: '#3b82f6', border: 'none',

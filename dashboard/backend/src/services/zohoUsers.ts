@@ -6,14 +6,17 @@ import { zohoThrottle } from './rateLimiter';
 
 /**
  * Zoho user profile with basic information.
- * 
+ *
  * This interface represents the minimal user data fetched from Zoho's /users/ endpoint.
  * Users are upserted to the database during sync and cached for runtime lookups.
  */
 export interface ZohoUser {
-  zohoId: string;    // Unique Zoho user ID (used as primary key in DB)
-  name: string;      // User display name from Zoho profile
-  email: string | null;   // Email address (null if not set in Zoho profile)
+  /** Unique Zoho user ID (used as primary key in DB) */
+  zohoId: string;
+  /** User display name from Zoho profile */
+  name: string;
+  /** Email address (null if not set in Zoho profile) */
+  email: string | null;
 }
 
 /** Batch size for paginated user fetches (100 users per request). */
@@ -26,12 +29,17 @@ const SETTINGS_KEY_TEAM_ID       = 'zoho_team_id';
 const SETTINGS_KEY_WORKSPACE_NAME = 'zoho_workspace_name';
 
 /**
- * Resolve the organization/team ID from Zoho API.
- * 
- * First checks Settings cache for previously resolved team ID. If not found,
- * fetches from Zoho /teams/ endpoint on first run and caches the result.
- * 
- * @returns The Zoho organization/team ID (zsoid)
+ * Resolves the organization (team) ID used to scope all Zoho API calls.
+ *
+ * Strategy:
+ * 1. Check the `Settings` table for a previously cached `zoho_team_id`.
+ * 2. If missing, hit Zoho's `/teams/` endpoint to discover the ID on first run.
+ * 3. Cache the result back to `Settings` so subsequent calls are O(1).
+ *
+ * Also derives and caches a workspace slug from the org/team name.
+ *
+ * @returns The Zoho organization/team ID (`zsoid`)
+ * @throws If the ID cannot be resolved from the Zoho response.
  */
 async function resolveTeamId(): Promise<string> {
   const cached = await prisma.settings.findUnique({ where: { key: SETTINGS_KEY_TEAM_ID } });
@@ -47,7 +55,7 @@ async function resolveTeamId(): Promise<string> {
   zohoThrottle.record(teamsRes.status);
 
   const teamsData = teamsRes.data;
-  
+
   // Extract organization ID from Zoho response (multiple possible fields)
   const zsoid: string | undefined =
     teamsData?.portals?.[0]?.zsoid ??
@@ -80,8 +88,20 @@ async function resolveTeamId(): Promise<string> {
 }
 
 /**
- * Fetch all users from Zoho and upsert to database.
- * Uses pagination with batch size of 100 users per request.
+ * Fetches **all** users from Zoho CRM and returns them as an array.
+ *
+ * The function paginates through every page of users using Zoho's `index`/`range`
+ * parameters (100 users per page). Each page is rate-limited via `zohoThrottle`.
+ *
+ * Field positions inside Zoho's `userJObj` are read from the `user_prop`
+ * configuration object returned alongside the data, making this resilient to
+ * per-organization field reordering.
+ *
+ * **Side effects:**
+ * - Resets and prints throttle stats for the current sync run.
+ * - (The caller is responsible for upserting the returned users into the DB.)
+ *
+ * @returns An array of `ZohoUser` objects representing every user in the org.
  */
 export async function fetchZohoUsers(): Promise<ZohoUser[]> {
   const token   = getAccessToken();
@@ -89,7 +109,7 @@ export async function fetchZohoUsers(): Promise<ZohoUser[]> {
   const usersUrl = `${config.zoho.apiBaseUrl}/team/${teamId}/users/`;
 
   console.log('\n👥 Syncing users');
-  
+
   // Reset stats for this sync run
   zohoThrottle.resetStats();
   const allUsers: ZohoUser[] = [];
@@ -105,7 +125,7 @@ export async function fetchZohoUsers(): Promise<ZohoUser[]> {
     zohoThrottle.record(res.status);
 
     const raw = res.data;
-    
+
     // userJObj contains the detailed user data indexed by Zoho ID
     const userJObj = raw?.userJObj as Record<string, unknown[]> | undefined;
 
@@ -118,14 +138,14 @@ export async function fetchZohoUsers(): Promise<ZohoUser[]> {
     const prop: Record<string, number> = raw.user_prop ?? {};
     const nameIdx  = prop.displayName ?? 0;
     const emailIdx = prop.emailId     ?? 1;
-    
+
     // Map Zoho user IDs to this page's data
     const userIds: string[] = raw.userIds ?? Object.keys(userJObj);
 
     for (const zpuid of userIds) {
       const fields = userJObj[zpuid];
       if (!fields) continue;
-      
+
       allUsers.push({
         zohoId: zpuid,
         name:   String(fields[nameIdx]  ?? 'Unknown'),
@@ -140,6 +160,6 @@ export async function fetchZohoUsers(): Promise<ZohoUser[]> {
 
   // Print summary after sync completes
   zohoThrottle.printSummary();
-  
+
   return allUsers;
 }

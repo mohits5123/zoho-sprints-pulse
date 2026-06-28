@@ -29,7 +29,9 @@ import axios from 'axios';
  * ```
  */
 
-// Axios client instance for all API requests
+// Axios client instance for all API requests.
+// All endpoints are prefixed with `/api` and proxied by the Vite dev server
+// in development; in production they are served by the Node backend.
 const apiClient = axios.create({ baseURL: '/api', timeout: 15000 });
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -357,6 +359,7 @@ export async function fetchIssues(
   if (opts.stale)          params.stale         = 'true';
   if (opts.staleDays)      params.staleDays     = opts.staleDays;
   if (opts.watchedStates?.length) params.watchedStates = opts.watchedStates.join(',');
+  // `params` is converted by Axios into a URL query string (e.g. ?status=Todo&stale=true).
   const res = await apiClient.get<{ issues: IssueItem[] }>(`/projects/${projectId}/sprints/${sprintId}/issues`, { params });
   return res.data;
 }
@@ -396,6 +399,7 @@ export async function fetchIssuesKanban(
   if (opts.stale)          params.stale         = 'true';
   if (opts.staleDays)      params.staleDays     = opts.staleDays;
   if (opts.watchedStates?.length) params.watchedStates = opts.watchedStates.join(',');
+  // `params` is converted by Axios into a URL query string (e.g. ?status=Todo&stale=true).
   const res = await apiClient.get<{ issues: IssueItem[] }>(`/projects/${projectId}/kanban/issues`, { params });
   return res.data;
 }
@@ -422,6 +426,7 @@ export async function fetchKanbanStaleCount(
   const params: Record<string, string | number> = {};
   if (opts.staleDays)      params.staleDays     = opts.staleDays;
   if (opts.watchedStates?.length) params.watchedStates = opts.watchedStates.join(',');
+  // `params` is converted by Axios into a URL query string.
   const res = await apiClient.get<{ staleCount: number }>(`/projects/${projectId}/kanban/stale-count`, { params });
   return res.data;
 }
@@ -593,6 +598,21 @@ export interface BurndownPoint {
   totalCount: number;
 }
 
+/**
+ * Fetch burndown chart data for a sprint.
+ *
+ * @param sprintZohoId - The Zoho ID of the sprint.
+ * @param seed - Optional initial data point to seed the burndown chart with
+ *               (e.g., the sprint's starting total and done counts).
+ *
+ * @returns Array of daily burndown data points, each containing a date and
+ *          cumulative done/total issue counts.
+ *
+ * @remarks
+ * The data is used to render a burndown chart showing sprint progress over time.
+ * When `seed` is provided, it is prepended as the first data point so the chart
+ * starts from the sprint's initial state rather than the first day with recorded data.
+ */
 export async function fetchBurndownData(
   sprintZohoId: string,
   seed?: { doneCount: number; totalCount: number },
@@ -680,6 +700,7 @@ export async function fetchKanbanUserStats(
   if (watchedStates.length) params.watchedStates = watchedStates.join(',');
   if (userId) params.userId = userId;
   if (creatorOnly) params.creatorOnly = 'true';
+  // `params` is converted by Axios into a URL query string.
   const res = await apiClient.get<{ users: UserLoadStat[]; totalStaleIssues: number }>(
     `/projects/${projectId}/kanban-user-stats`,
     { params },

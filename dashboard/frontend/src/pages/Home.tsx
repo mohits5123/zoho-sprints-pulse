@@ -46,6 +46,8 @@ export function Home() {
   const [syncingSprints, setSyncingSprints] = useState(false);
   const [sprintSyncError, setSprintSyncError] = useState<string | null>(null);
 
+  // On mount: fetch Zoho connection status and current counts for users, projects, and sprints
+  // from the local SQLite database. These are fire-and-forget reads — failures default to 0.
   useEffect(() => {
     fetchStatus()
       .then(setStatus)
@@ -57,6 +59,15 @@ export function Home() {
     fetchSprints().then((d) => setSprintCount(d.total)).catch(() => setSprintCount(0));
   }, []);
 
+  /**
+   * Trigger a synchronous user/team sync with Zoho.
+   *
+   * The backend executes the sync synchronously (no async polling), so
+   * `setSyncActive` is deactivated immediately after the response resolves.
+   * The new count is taken from `result.synced` in the response.
+   *
+   * @param e - The click event (prevents propagation to avoid card navigation).
+   */
   async function handleSyncUsers(e: React.MouseEvent) {
     e.stopPropagation();
     setSyncingUsers(true);
@@ -75,6 +86,20 @@ export function Home() {
     }
   }
 
+  /**
+   * Trigger a background project sync with Zoho.
+   *
+   * Unlike user sync, the backend starts the project sync asynchronously
+   * (`setImmediate → runFullSync → startSync`) and returns `{ synced: 0 }`
+   * immediately. The count is NOT updated here — it will be refreshed when
+   * the user navigates to /projects or on the next page visit.
+   *
+   * A 10-second safety timeout in `SyncProgressBar` stops polling if
+   * `startSync` never fires. Completion is otherwise detected when
+   * `setSyncActive(false)` is called by the page that owns the sync.
+   *
+   * @param e - The click event (prevents propagation to avoid card navigation).
+   */
   async function handleSyncProjects(e: React.MouseEvent) {
     e.stopPropagation();
     setSyncingProjects(true);
@@ -95,6 +120,18 @@ export function Home() {
     }
   }
 
+  /**
+   * Trigger a background sprint sync with Zoho.
+   *
+   * Like project sync, this fires the backend asynchronously and returns
+   * immediately. The client does NOT clear `sprintCount` — it retains the
+   * existing value until the background sync completes and the page re-fetches.
+   *
+   * A 10-second safety timeout in `SyncProgressBar` stops polling if
+   * `startSync` never fires.
+   *
+   * @param e - The click event (prevents propagation to avoid card navigation).
+   */
   async function handleSyncSprints(e: React.MouseEvent) {
     e.stopPropagation();
     setSyncingSprints(true);
@@ -114,6 +151,10 @@ export function Home() {
     }
   }
 
+  // Derived values used to determine card interactivity and display state.
+  // `portal` is the first (and likely only) Zoho workspace the user is connected to.
+  // `expiresAt` is the formatted token expiry time, shown in the connection card.
+  // The `*Synced` booleans gate navigation: cards are only clickable once data has been synced.
   const portal         = status?.portals?.[0];
   const expiresAt      = status?.tokenExpiresAt ? new Date(status.tokenExpiresAt).toLocaleTimeString() : null;
   const usersSynced    = userCount !== null && userCount > 0;
@@ -272,7 +313,11 @@ export function Home() {
   );
 }
 
+// ── Inline styles ────────────────────────────────────────────────────────────
+// All styles are defined as a plain object for consistency with the component's
+// minimal, zero-dependency styling approach (no CSS modules, no styled-components).
 const s: Record<string, React.CSSProperties> = {
+  // Full-page background with dark slate theme
   page: {
     minHeight: '100vh',
     backgroundColor: '#0f172a',
@@ -280,6 +325,7 @@ const s: Record<string, React.CSSProperties> = {
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     padding: '0 24px 48px',
   },
+  // Header row: title on the left, connection status badge on the right
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -290,17 +336,22 @@ const s: Record<string, React.CSSProperties> = {
   },
   title:    { margin: 0, fontSize: 28, fontWeight: 700, color: '#f1f5f9' },
   subtitle: { margin: '4px 0 0', fontSize: 14, color: '#64748b' },
+  // Main content container: centered, 960px max-width, vertical stacking with gaps
   main: { maxWidth: 960, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 },
+  // Responsive 3-column grid that collapses to fewer columns on narrow screens
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 },
+  // Base card style: dark background, subtle border, rounded corners
   card: {
     backgroundColor: '#1e293b',
     border: '1px solid #334155',
     borderRadius: 12,
     padding: '24px 28px',
   },
+  // Card header: title on the left, resync button on the right
   cardHeader: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 },
   cardTitle: { margin: 0, fontSize: 16, fontWeight: 600, color: '#f1f5f9' },
   cardHint:  { margin: '4px 0 0', fontSize: 12, color: '#64748b' },
+  // Row showing the synced count with its label
   countRow:  { display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 },
   count:     { fontSize: 32, fontWeight: 700, color: '#3b82f6', lineHeight: 1 },
   countLabel:{ fontSize: 14, color: '#94a3b8' },
@@ -311,12 +362,14 @@ const s: Record<string, React.CSSProperties> = {
     border: 'none', borderRadius: 8,
     fontSize: 14, fontWeight: 600, cursor: 'pointer',
   },
+  // Secondary (outline) button used for the in-card "Resync" action
   resyncBtn: {
     padding: '6px 16px', backgroundColor: 'transparent',
     color: '#94a3b8', border: '1px solid #334155',
     borderRadius: 7, fontSize: 13, fontWeight: 500,
     cursor: 'pointer', flexShrink: 0,
   },
+  // Key-value row inside the Zoho connection card
   row:   { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #0f172a' },
   label: { fontSize: 14, color: '#94a3b8' },
   value: { fontSize: 14, color: '#e2e8f0', fontWeight: 500 },

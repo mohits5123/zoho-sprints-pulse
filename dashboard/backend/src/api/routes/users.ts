@@ -11,6 +11,9 @@ import prisma from '../../db/client';
 import { fetchZohoUsers } from '../../services/zohoUsers';
 import { queryUserIssues, queryUserSprintHistory } from '../../services/issueQueries';
 
+// All route handlers below are mounted under the Express router and protected by the
+// application-level OAuth middleware (applied when this router is registered in the app).
+
 const router = Router();
 
 /**
@@ -61,8 +64,12 @@ router.get('/', async (_req, res) => {
  */
 router.get('/:id/profile', async (req, res) => {
   try {
+    // Parse staleness threshold — defaults to 7 days, clamped to minimum of 1.
     const staleDays = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
-    const watchedStates = req.query.watchedStates ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean) : [];
+    // Optional comma-separated list of Zoho issue states to include; defaults to all states.
+    const watchedStates = req.query.watchedStates
+      ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean)
+      : [];
     const user = await prisma.user.findUnique({ where: { zohoId: req.params.id } });
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
@@ -163,6 +170,8 @@ router.post('/sync', async (_req, res) => {
 
     res.json({ synced: upserted.length, users: upserted });
   } catch (err) {
+    // Distinguish between an Axios error (network / Zoho API failure) and a generic error.
+    // When the error is Axios-based, include the remote status code and response body for debugging.
     const zohoBody = axios.isAxiosError(err) ? err.response?.data : undefined;
     const message  = axios.isAxiosError(err)
       ? `Zoho API ${err.response?.status ?? 'error'} at ${err.config?.url}: ${JSON.stringify(zohoBody ?? err.message)}`
@@ -192,7 +201,8 @@ router.patch('/:id/role', async (req, res) => {
   try {
     const { id } = req.params;
     const { role } = req.body as { role: string };
-    
+
+    // Validate that the role is one of the allowed local-only labels.
     if (!VALID_ROLES.includes(role as Role)) {
       res.status(400).json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(', ')}` });
       return;

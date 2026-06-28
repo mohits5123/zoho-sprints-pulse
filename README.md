@@ -1,225 +1,306 @@
-# Zonaliser - Engineering Delivery Intelligence Dashboard
+# Zonaliser
 
-A local-first, read-only analytics dashboard for engineering teams powered by [Zoho Sprints](https://www.zoho.com/sprints). Track sprint health, ticket staleness, developer workload, and team bottlenecks entirely offline.
+Zonaliser is a local-first, read-only engineering analytics dashboard built on top of [Zoho Sprints](https://www.zoho.com/sprints). It gives engineering managers a single pane of glass into sprint health, developer workload, ticket aging, and delivery risk — running entirely on a local machine with no cloud dependency and no auth wall.
 
-## 🎯 Purpose
+All data is cached locally in SQLite. Zoho is only contacted during scheduled background syncs. Every page load reads from the local database with zero live API calls.
 
-Zonaliser provides engineering managers with visibility into:
-- **Sprint health** - Burndown charts, sprint velocity, completion rates
-- **Ticket aging** - Detect stale issues and aging bugs
-- **Developer load** - Who's overloaded, who has capacity
-- **Team bottlenecks** - Identify blocked work and delays
+---
 
-Runs entirely on your local machine — no cloud sync, no auth wall.
+## Features
 
-## 🏗️ Architecture
+**Developer workload**
+View per-developer open issue counts, WIP distribution, and overdue work. Role labels (DEV / QA / PROD / OTHER) are set locally and not sourced from Zoho.
 
-### Local-First Design
-All data is cached locally in SQLite. Zoho Sprints API is only contacted during scheduled syncs:
+**Sprint health**
+Per-sprint burndown charts built from historical snapshots. See completed vs. remaining work over time.
 
-```
-Browser → Vite Dev Server (port 5173) → Express Backend (port 3001) → SQLite
-                                                ↓
-                                          (every 3 hours)
-                                              ↓
-                                         Zoho Sprints API
-```
+**Board view**
+Visual Kanban/Scrum board grouped by status bucket (To Do / In Progress / Done). Issues are grouped per the project's custom status map synced from Zoho.
 
-### Tech Stack
+**Backlog view**
+Project-level backlog with filtering by status, assignee, and staleness.
 
-**Backend (Node.js/TypeScript)**
-- Express.js API server
-- Prisma ORM with SQLite database
-- Cron jobs for automated syncs (every 3 hours)
-- Rate-limited Zoho API client (25 req/min max to avoid lockouts)
+**Issue list**
+Filterable, sortable issue table per project with computed staleness and delay indicators.
 
-**Frontend (React + Vite)**
-- React 18 with TypeScript
-- Custom SVG charts (no charting libraries)
-- React Router for navigation
-- Pure inline styles (no CSS frameworks)
+**Aging and risk detection**
+Issues are flagged at query time using configurable thresholds:
 
-## 📊 Data Models
+| Signal | Default threshold |
+|---|---|
+| Stale issue | No update for 7 days |
+| Delayed issue | Past target date and not closed |
 
-The local database tracks:
-- **Users** - Team members with Zoho IDs and roles (DEV/QA/PROD/OTHER)
-- **Projects** - Boards with custom status maps and sprint assignments
-- **Sprints** - Timeboxed iterations with health metrics
-- **Epics** - Epics grouping related issues
-- **Issues** - Tasks, bugs, stories with assignees and dates
-- **Burndown Snapshots** - Historical progress tracking
+Thresholds are passed as query parameters and are never hardcoded.
 
-### Computed Fields (not stored)
-- `isStale` - Issue age exceeds threshold (default 7 days)
-- `delayedDays` - Days past target date if not closed
+**Sync progress**
+A persistent progress bar tracks the active sync and displays live status. Manual sync can be triggered from the UI or via `POST /api/sprints/sync`.
 
-## 🚀 Getting Started
+---
+
+## Installation
 
 ### Prerequisites
-- Node.js 18+
-- Zoho Sprints account with API access
 
-### Setup
+- Node.js 18 or later
+- A Zoho Sprints account with OAuth API access
 
-1. **Configure environment variables** (add to `~/.zshrc`):
-   ```bash
-   export ZOHO_CLIENT_ID="your-client-id"
-   export ZOHO_CLIENT_SECRET="your-secret"
-   export ZOHO_REFRESH_TOKEN="your-refresh-token"
-   ```
+### 1. Obtain Zoho credentials
 
-2. **Install dependencies**:
-   ```bash
-   cd dashboard/backend && npm install
-   cd ../frontend && npm install
-   ```
+Create an OAuth client in the [Zoho API Console](https://api-console.zoho.com/) and generate a refresh token with Sprints read permissions. You will need:
 
-3. **Run the application**:
-   
-   Terminal 1 (Backend):
-   ```bash
-   cd dashboard/backend
-   npm run dev
-   # API running at http://localhost:3001
-   ```
+- `ZOHO_CLIENT_ID`
+- `ZOHO_CLIENT_SECRET`
+- `ZOHO_REFRESH_TOKEN`
 
-   Terminal 2 (Frontend):
-   ```bash
-   cd dashboard/frontend
-   npm run dev
-   # Frontend running at http://localhost:5173
-   ```
+### 2. Configure environment variables
 
-4. **Trigger first sync**:
-   - Manual sync via API: `POST /api/sprints/sync` or UI button
-   - Auto-sync runs every 3 hours (cron)
+Add the following to your `~/.zshrc` (or equivalent shell profile). Do not use a `.env` file — the backend does not load one.
 
-**First sync takes ~4 minutes** for teams with 80-93 issues. Subsequent runs are incremental.
+```bash
+export ZOHO_CLIENT_ID="your-client-id"
+export ZOHO_CLIENT_SECRET="your-client-secret"
+export ZOHO_REFRESH_TOKEN="your-refresh-token"
 
-## 📡 API Reference
+# Optional: discovered automatically on first run
+# export ZOHO_PORTAL_ID="your-portal-id"
 
-### Health & Status
-- `GET /api/health` - Liveness probe
-- `GET /api/status` - Sync status, last sync time
+# Optional: sets the workspace name displayed in the dashboard
+# export ZOHO_WORKSPACE_NAME="your-workspace-name"
 
-### Data Endpoints
-- `GET /api/users/:id` - User details with issue counts
-- `GET /api/projects` - All projects with board type and display order
-- `POST /api/sprints/sync` - Manual trigger for data sync
-- `GET /api/team/workload/:projectId` - Developer load by project
-- `POST /api/projects/teams/:id/reassign-user` - Reassign issues
+# Optional: override default backend port (default: 3001)
+# export PORT=3001
+```
 
-### Analytics (Local-only, no Zoho calls)
-All data routes read from SQLite:
+Then reload your shell:
 
-- `GET /api/projects/:id/issues` - Issues filtered by assigneeIds, status
-- `GET /api/sprints/:id/issues` - Sprint issues with health metrics
-- `GET /api/projects/:id/burndown` - Burndown chart data points
-- `GET /api/projects/:id/team/teamload` - Team workload distribution
+```bash
+source ~/.zshrc
+```
 
-## 🎨 Frontend Routes
+### 3. Install dependencies
 
-Seven main pages:
-- `/` - Dashboard with key metrics
-- `/users` - User list and filtering (by role)
-- `/projects` - Project board management
--BoardPage - Visual project boards with drag-and-drop status changes
-- `/issues` - Full issue list with filtering/sorting
-- `/sprint/:id/health` - Sprint health and burndown chart
+```bash
+cd dashboard/backend && npm install
+cd ../frontend && npm install
+```
 
-## 🛠️ Development
+### 4. Start the application
 
-### Backend
+Open two terminal windows:
+
+**Terminal 1 — Backend**
 ```bash
 cd dashboard/backend
-npm run dev          # Start dev server with tsx watch
-npm run build        # Production build
-npm start            # Run production binary
+npm run dev
+# API server running at http://localhost:3001
 ```
 
-### Frontend  
+**Terminal 2 — Frontend**
 ```bash
 cd dashboard/frontend
-npm run dev          # Start Vite dev server (proxies /api/* → :3001)
-npm run build        # Production build
-npm run preview      # Preview production build
+npm run dev
+# Dashboard running at http://localhost:5173
 ```
 
-## 🔒 Security & Best Practices
+### 5. Trigger the initial sync
 
-### Rate Limiting
-- Zoho API: 25 requests per 60-second sliding window
-- Enforced via `src/services/rateLimiter.ts`
-- **Critical**: All Zoho API calls must use the rate limiter to avoid team-wide lockouts
+Open the dashboard at `http://localhost:5173`. Use the sync button in the UI or send a manual request:
 
-### Security
-- Environment variables in `~/.zshrc` (NOT `.env` files)
-- CORS limited to `http://localhost:5173` in dev mode
-- Read-only API access (no write operations to Zoho)
+```bash
+curl -X POST http://localhost:3001/api/sprints/sync
+```
+
+The first sync fetches all projects, sprints, users, epics, and issues from Zoho. For teams with around 80–100 issues this takes approximately 4 minutes due to Zoho's rate limit. Subsequent syncs are incremental.
+
+The dashboard displays empty states until the first sync completes. This is expected.
+
+---
+
+## Architecture
+
+### Data flow
+
+```
+Runtime (every page load):
+  Browser → Vite (5173) → Express (3001) → SQLite       [zero Zoho calls]
+
+Sync (cron every 1 hours, or manual POST):
+  Express → Zoho Sprints API (rate-limited) → SQLite
+```
+
+All analytics endpoints read exclusively from the local SQLite database. The Zoho API client is only invoked by the sync engine, which runs on a cron schedule (`0 * * * *`) or when manually triggered.
+
+### Tech stack
+
+| Layer | Technology |
+|---|---|
+| Backend runtime | Node.js with TypeScript |
+| API server | Express.js |
+| ORM | Prisma |
+| Database | SQLite (local file) |
+| Scheduler | node-cron |
+| Frontend | React 18 with TypeScript |
+| Build tool | Vite |
+| Routing | React Router v7 |
+| Charts | Custom SVG (no charting library) |
+| Styling | Inline `React.CSSProperties` (no CSS framework) |
+
+### Rate limiting
+
+The Zoho API enforces a hard limit across an entire team. Exceeding it returns HTTP 400 `"API locked for team"` and blocks all Zoho access for everyone in the organisation.
+
+The sync engine enforces a **25 requests per 60-second sliding window** via `src/services/rateLimiter.ts`. Every Zoho fetch must call `await zohoThrottle.wait()` before the request and `zohoThrottle.record()` after. This is non-negotiable.
 
 ### Database
-- SQLite file: `dashboard/backend/prisma/dev.db`
-- Migrations via Prisma: `npx prisma migrate dev --name <name>`
 
-## 🧑‍💻 Customization
+SQLite file: `dashboard/backend/prisma/dev.db`
 
-### Risk Thresholds
-Configure detection thresholds in route query params:
-- `staleDays` - Days before issue is marked stale (default: 7)
-- Custom thresholds for bug aging, WIP limits, delayed stories
+Six models: `User`, `Project`, `Sprint`, `Epic`, `Issue`, `BurndownSnapshot`, plus a `Settings` key-value table.
 
-Example: `GET /api/projects/:id/issues?staleDays=14&bugStaleDays=2`
+Computed fields (`isStale`, `delayedDays`) are not stored. They are calculated in JavaScript from `createdAt` and `endDate` at query time inside `src/services/issueQueries.ts`.
 
-### Sync Schedule
-Edit cron schedule in `src/index.ts`:
-```typescript
-cron.schedule('0 */3 * * *', () => { /* runs every 3 hours */ })
+`Issue.assigneeIds` is stored as a JSON string (`'["zohoId1","zohoId2"]'`). User-filter queries use SQLite's `json_each()` function. Treat it as opaque text — not a native array.
+
+Run migrations with:
+```bash
+cd dashboard/backend
+npx prisma migrate dev --name <migration-name>
 ```
 
-## 📁 Project Structure
+---
+
+## Configuration
+
+### Risk thresholds
+
+Risk signals are passed as query parameters to analytics endpoints. No threshold is hardcoded.
+
+```
+GET /api/projects/:id/issues?staleDays=14
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `staleDays` | `7` | Days since last update before an issue is flagged as stale |
+
+### Sync schedule
+
+The cron schedule is defined in `dashboard/backend/src/index.ts`:
+
+```typescript
+cron.schedule('0 * * * *', runFullSync);
+```
+
+Change the cron expression to adjust sync frequency.
+
+---
+
+## API Reference
+
+### Health and status
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/health` | Liveness probe |
+| `GET` | `/api/status` | Last sync time and sync status |
+| `GET` | `/api/sync-status` | Live sync progress |
+| `POST` | `/api/sprints/sync` | Trigger a manual sync (fire-and-forget) |
+
+### Projects
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/projects` | All projects with board type and display order |
+| `PATCH` | `/api/projects/:id/board-type` | Update project board type |
+| `PATCH` | `/api/projects/:id/display-order` | Update display order |
+| `PATCH` | `/api/projects/:id/hidden` | Toggle project visibility |
+| `GET` | `/api/projects/:id/issues` | Issues filtered by assignee, status, staleness |
+| `GET` | `/api/projects/:id/burndown` | Burndown chart data points |
+| `GET` | `/api/projects/:id/team/teamload` | Team workload distribution |
+
+### Sprints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/sprints/:id/issues` | Sprint issues with health metrics |
+
+### Users
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/users` | All users |
+| `GET` | `/api/users/:id` | User details |
+| `PATCH` | `/api/users/:id/role` | Set user role (`DEV`/`QA`/`PROD`/`OTHER`) |
+
+### Team
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/team/workload/:projectId` | Developer workload by project |
+
+---
+
+## Frontend Pages
+
+| Route | Page | Description |
+|---|---|---|
+| `/` | Home | Overview dashboard with key metrics |
+| `/users` | Users | Team list with role filtering |
+| `/users/:userId` | User Profile | Per-developer issue breakdown |
+| `/projects` | Projects | Project list with board type controls |
+| `/board/:projectId` | Board | Kanban/Scrum board view |
+| `/board/:projectId/issues` | Issue List | Detailed issue table for a project |
+| `/backlog/:projectId` | Backlog | Project backlog view |
+| `/sprints` | Sprint Health | Sprint burndown and health metrics |
+
+---
+
+## Project Structure
 
 ```
 Zonaliser/
 ├── dashboard/
-│   ├── backend/                   # Express API server (Node.js)
+│   ├── backend/
 │   │   ├── src/
-│   │   │   ├── services/          # Zoho fetchers, sync logic
-│   │   │   ├── api/                # API routes
-│   │   │   └── index.ts            # Entry point, bootstrap
-│   │   ├── prisma/                 # Database schema & migrations
+│   │   │   ├── api/
+│   │   │   │   └── routes/        # One file per route group
+│   │   │   ├── config/            # Environment variable loading
+│   │   │   ├── db/                # Prisma client singleton
+│   │   │   ├── services/
+│   │   │   │   ├── issueQueries.ts        # DB-only query layer (all runtime routes use this)
+│   │   │   │   ├── rateLimiter.ts         # Zoho rate limiter (25 req/60s)
+│   │   │   │   ├── zohoAuth.ts            # OAuth refresh token flow
+│   │   │   │   ├── zohoSprints.ts         # Zoho fetchers and sync engine
+│   │   │   │   ├── zohoProjects.ts        # Project list sync
+│   │   │   │   ├── zohoUsers.ts           # User sync
+│   │   │   │   ├── burndownSnapshots.ts   # Burndown history
+│   │   │   │   └── syncStatus.ts          # Last-synced-at tracking
+│   │   │   └── index.ts           # Entry point: bootstrap, Express, cron
+│   │   ├── prisma/
+│   │   │   ├── schema.prisma      # Database schema
+│   │   │   └── dev.db             # SQLite database file (gitignored)
 │   │   └── package.json
-│   └── frontend/                   # React SPA (Vite)
+│   └── frontend/
 │       ├── src/
-│       │   ├── pages/              # React Router pages
-│       │   ├── components/         # Reusable UI components
-│       │   └── api/client.ts       # API client with axios
+│       │   ├── api/client.ts      # All backend fetch calls go through here
+│       │   ├── pages/             # One file per route
+│       │   ├── components/        # Shared UI components and charts
+│       │   ├── contexts/          # SyncProgressContext
+│       │   └── types/             # Shared TypeScript types
+│       ├── vite.config.ts         # Proxies /api/* to localhost:3001
 │       └── package.json
-├── .github/                       # GitHub workflows, actions
-├── .gitignore                     # Git ignore patterns
-└── README.md                      # This file
+├── docs/                          # Architecture and schema documentation
+└── .github/                       # Copilot instructions
 ```
-
-## 🐛 Known Issues & Gotchas
-
-1. **First run shows empty data** - Wait ~4 minutes for sync to complete
-2. **CORS errors during startup** - Normal on cold start, resolves after backend starts
-3. **.env file not loaded by backend** - All env vars must be in shell (`~/.zshrc`)
-4. **Stale data window** - Issues max 3 hours old between syncs
-
-## 📝 Data Flow Summary
-
-1. **Sync** (every 3 hours or manual):
-   - Backend contacts Zoho Sprints API (rate-limited)
-   - Fetches projects, sprints, users, issues
-   - Upserts into local SQLite via Prisma
-
-2. **Runtime** (every page load):
-   - Frontend requests data via `/api/*` routes
-   - Backend proxies to SQLite (zero Zoho calls)
-   - Returns cached analytics from local DB
-
-3. **No data = no Zoho calls** - The backend never queries live Zoho during normal operation
 
 ---
 
-**Built with ❤️ for engineering teams using Zoho Sprints**
+## Known Limitations
+
+- **Empty state on first run** — the dashboard shows no data until the first sync completes (~5 minutes). This is expected.
+- **Cold start proxy errors** — if the frontend loads before the backend is ready, Vite logs `ECONNREFUSED`. This resolves once the backend starts.
+- **No `.env` file support** — credentials must be exported from the shell environment. The backend does not call `dotenv`.
+- **Stale data window** — issues can be up to 3 hours old between scheduled syncs. Trigger a manual sync if fresher data is needed.
+- **No automated test suite** — validation is currently done via `tsx watch` and manual UI verification.
+- **CORS locked to `localhost:5173`** — change in `src/index.ts` if using a different frontend origin.

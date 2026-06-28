@@ -15,7 +15,18 @@ import { DonutChart } from './DonutChart';
  * - Done badge when all tickets are completed
  */
 
+/**
+ * Color mapping for status groups used throughout the donut chart and status rows.
+ * - todo: slate (neutral)
+ * - doing: blue (in-progress)
+ * - done: green (completed)
+ */
 const GROUP_COLORS = { todo: '#64748b', doing: '#3b82f6', done: '#22c55e' };
+
+/**
+ * Canonical ordering for status groups, ensuring consistent rendering
+ * across the donut chart segments and status breakdown rows.
+ */
 const GROUP_ORDER  = ['todo', 'doing', 'done'] as const;
 
 interface EpicCardProps {
@@ -32,19 +43,24 @@ interface EpicCardProps {
 }
 
 export function EpicCard({ epic, staleDays, onStatusClick, onStaleClick, onUserClick }: EpicCardProps) {
+  // Convert the status breakdown map to a sorted array, ordered by GROUP_ORDER.
   const rawEntries = Object.entries(epic.statusBreakdown);
+  // Use the precomputed total from the API if available; otherwise sum from breakdown.
   const total      = epic.total || rawEntries.reduce((s, [, n]) => s + n, 0);
+  // An epic is "all done" when every status maps to the 'done' group and total > 0.
   const allDone    = total > 0 && rawEntries.every(([status]) => epic.statusGroups[status] === 'done');
 
-  // Aggregate counts by group for donut
+  // Aggregate raw status counts into their parent groups (todo/doing/done) for the donut chart.
   const groupCounts: Record<string, number> = { todo: 0, doing: 0, done: 0 };
   for (const [status, count] of rawEntries) {
     const g = epic.statusGroups[status] ?? 'todo';
     if (g in groupCounts) groupCounts[g] += count;
   }
   const doneCount = groupCounts.done;
+  // Compute completion percentage, guarded against division by zero.
   const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
 
+  // Build segments for the donut chart in canonical order.
   const donutSegments = GROUP_ORDER.map((g) => ({
     value: groupCounts[g],
     color: GROUP_COLORS[g],
@@ -53,13 +69,15 @@ export function EpicCard({ epic, staleDays, onStatusClick, onStaleClick, onUserC
 
   return (
     <div style={{ ...s.card, ...(allDone ? { borderColor: '#22c55e55' } : {}) }}>
-      {/* Header row */}
+      {/* Header row: epic label with optional badges */}
       <div style={s.header}>
         <span style={s.epicLabel}>Epic</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {/* Show a green "Done" badge when every ticket in the epic is completed. */}
           {allDone && (
             <span style={s.doneBadge} title="All tickets done">✓ Done</span>
           )}
+          {/* Show a yellow stale badge when there are aged issues (only if not all done). */}
           {!allDone && epic.staleCount > 0 && (
             <span
               style={{ ...s.staleBadge, cursor: onStaleClick ? 'pointer' : 'default' }}
@@ -74,7 +92,7 @@ export function EpicCard({ epic, staleDays, onStatusClick, onStaleClick, onUserC
 
       <h3 style={s.epicName}>{epic.name}</h3>
 
-      {/* Users */}
+      {/* User avatars sorted by role, each optionally clickable */}
       {epic.users.length > 0 && (
         <div style={s.users}>
           {sortByRole(epic.users).map((u) => (
@@ -88,7 +106,7 @@ export function EpicCard({ epic, staleDays, onStatusClick, onStaleClick, onUserC
         </div>
       )}
 
-      {/* Donut + total side by side */}
+      {/* Donut chart and status breakdown displayed side by side */}
       <div style={s.ringRow}>
         <DonutChart
           segments={donutSegments}
@@ -97,7 +115,7 @@ export function EpicCard({ epic, staleDays, onStatusClick, onStaleClick, onUserC
           centerLabel={`${pct}%`}
           centerSub={`${doneCount}/${total}`}
         />
-        {/* Status breakdown rows — clickable */}
+        {/* Status breakdown rows — each row is clickable to trigger filtering */}
         <div style={s.breakdown}>
           {rawEntries.map(([status, count]) => (
             <EpicStatusRow
@@ -112,16 +130,22 @@ export function EpicCard({ epic, staleDays, onStatusClick, onStaleClick, onUserC
         </div>
       </div>
 
+      {/* Empty state shown when the epic has no tickets at all */}
       {total === 0 && <p style={s.muted}>No tickets in this sprint.</p>}
     </div>
   );
 }
 
 /**
- * EpicStatusRow displays a single status breakdown row with:
- * - Color-coded dot (by group: todo/doing/done)
- * - Status label, count and percentage
- * - Optional click handler for filtering
+ * EpicStatusRow renders a single row in the status breakdown panel.
+ *
+ * Each row shows:
+ * - A colored dot reflecting the status's group (todo/doing/done)
+ * - The status label (e.g. "todo", "done")
+ * - The raw count of issues
+ * - The percentage of total issues this status represents
+ *
+ * When `onClick` is provided the row becomes interactive (pointer cursor + hover highlight).
  */
 function EpicStatusRow({ status, count, total, color, onClick }: {
   /** Status name (e.g., 'todo', 'done') */
@@ -130,11 +154,12 @@ function EpicStatusRow({ status, count, total, color, onClick }: {
   count: number;
   /** Total issues across all statuses */
   total: number;
-  /** Color of the status dot */
+  /** Color of the status dot, derived from the status group mapping */
   color: string;
-  /** Optional callback when row is clicked */
+  /** Optional callback when row is clicked, enabling filter-by-status behavior */
   onClick?: () => void;
 }) {
+  // Track hover state to highlight the row on mouse-over (only when clickable).
   const [hovered, setHovered] = useState(false);
   const clickable = !!onClick;
   return (
@@ -163,11 +188,11 @@ function EpicStatusRow({ status, count, total, color, onClick }: {
 }
 
 /**
- * Inline styles for EpicCard component
+ * Inline styles for EpicCard and EpicStatusRow.
+ * All values are tuned for the app's dark theme (slate-based palette).
  */
 const s: Record<string, React.CSSProperties> = {
-  /** Card container with dark theme */
-  /** Card container with dark theme */
+  /** Card container with dark theme and rounded corners */
   card: {
     backgroundColor: '#1e293b', border: '1px solid #334155',
     borderRadius: 12, padding: '20px 22px',
@@ -197,9 +222,8 @@ const s: Record<string, React.CSSProperties> = {
   /** User avatars container */
   users: { display: 'flex', flexWrap: 'wrap' as const, gap: 4 },
   /** Donut chart and breakdown side-by-side row */
-  /** Status breakdown rows container */
   ringRow: { display: 'flex', alignItems: 'center', gap: 12 },
-  /** Individual breakdown row */
+  /** Status breakdown rows container */
   breakdown: { display: 'flex', flexDirection: 'column', gap: 3, flex: 1 },
   /** Single status row layout */
   breakdownRow: { display: 'flex', alignItems: 'center', gap: 6 },

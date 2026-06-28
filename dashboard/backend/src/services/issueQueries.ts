@@ -346,6 +346,8 @@ function applyFilters(issues: IssueItem[], opts: IssueQueryOpts): IssueItem[] {
     if (userFilter) {
       const isCreator  = issue.creator?.id === userFilter;
       const isAssignee = issue.assignees.some((a) => a.id === userFilter);
+      // creatorOnly=true: include only if user is the creator (not assignee)
+      // creatorOnly=false/default: exclude issues where user is neither creator nor assignee
       if (creatorOnly ? !isCreator : (!isCreator && !isAssignee)) return false;
     }
     if (staleOnly && !issue.isStale) return false;
@@ -425,6 +427,7 @@ export async function queryIssues(
   // Filter by watched states if configured (for staleness calculation and bar graph)
   // If watchedStates is empty, show all issues (default behavior)
   if (watchedStates.length > 0) {
+    // Narrow the result set to only issues in watched statuses before applying runtime filters
     const filtered = issues.filter(issue => watchedStates.includes(issue.status));
     issues = filtered;
   }
@@ -661,7 +664,8 @@ export async function querySprintEpics(
 
       statusBreakdownRaw[issue.status] = (statusBreakdownRaw[issue.status] ?? 0) + 1;
 
-      // Collect users — both assignees AND the ticket creator
+      // Collect users — both assignees AND the ticket creator (only if different from assignee).
+      // '-1' is Zoho's sentinel value meaning "unassigned" and must be excluded.
       const userIdsToAdd: string[] = [];
       if (issue.creatorZohoId && issue.creatorZohoId !== '-1') {
         userIdsToAdd.push(issue.creatorZohoId);
@@ -673,6 +677,7 @@ export async function querySprintEpics(
         }
       } catch { /* empty */ }
 
+      // Deduplicate users per epic using a Set-like Map pattern
       for (const uid of userIdsToAdd) {
         if (!userSet.has(uid)) {
           userSet.set(uid, userMap.get(uid) ?? { id: uid, name: 'Unknown', role: 'OTHER' });
@@ -807,11 +812,13 @@ export async function queryTeamLoad(staleDays: number = 7): Promise<{
       const entry = map.get(uid)!;
       
       // Increment counters based on status group (not specific status)
+      // Each status group bucket is mutually exclusive — an issue belongs to exactly one
       if      (issue.statusGroup === 'todo')  entry.todo++;
       else if (issue.statusGroup === 'doing') entry.doing++;
       else if (issue.statusGroup === 'done')  entry.done++;
       
-      // Stale counter is independent and can apply to any status group
+      // Stale counter is independent and can apply to any status group (an issue can be both
+      // "doing" and stale simultaneously)
       if (isStale) entry.stale++;
     }
   }
@@ -902,8 +909,13 @@ export async function queryUserIssues(
   });
   const projectByZohoId = new Map(projects.map(p => [p.zohoId, p]));
 
-  // Raw query using json_each to find issues where user is assignee or creator
-  // SQLite json_each lets us search inside the JSON array without loading all issues
+  // Raw query using json_each to find issues where user is assignee or creator.
+  // SQLite json_each lets us search inside the JSON array without loading all issues.
+  //
+  // The query combines two conditions with OR:
+  //   1. creatorZohoId = ?  — user created the issue
+  //   2. EXISTS(json_each) — user is in the assignees JSON array
+  // DISTINCT ensures no duplicates if user is both creator AND assignee.
   type RawIssueRow = {
     zohoId: string; sprintZohoId: string; projectZohoId: string;
     itemNo: string; title: string; status: string; statusGroup: string;
@@ -913,7 +925,8 @@ export async function queryUserIssues(
 
   const sprintPlaceholders = activeSprintZohoIds.map(() => '?').join(', ');
   
-  // SQL query combining creator check AND assignee JSON membership check
+  // SQL query combining creator check AND assignee JSON membership check.
+  // Parameter binding order: [sprint IDs..., creatorZohoId, assigneeZohoId]
   const rawIssues = await prisma.$queryRawUnsafe<RawIssueRow[]>(
     `SELECT DISTINCT i.*
      FROM "Issue" i
@@ -925,8 +938,8 @@ export async function queryUserIssues(
          )
        )`,
     ...activeSprintZohoIds,  // All active sprint IDs for IN clause
-    userZohoId,              // Creator filter value
-    userZohoId,              // Assignee filter value (repeated for param binding)
+    userZohoId,              // Creator filter value (placeholder 1 in WHERE)
+    userZohoId,              // Assignee filter value (placeholder 2 in EXISTS)
   );
 
   const userMap = await buildUserMap();
@@ -1050,7 +1063,9 @@ export async function queryUserSprintHistory(
     userZohoId,        // Assignee filter value
   );
 
-  // Aggregate counts per sprint using a Map
+  // Aggregate counts per sprint using a Map.
+  // The SQL GROUP BY returns one row per (sprint, statusGroup) combination,
+  // so we need to merge them back into per-sprint totals.
   const sprintStats = new Map<string, { assigned: number; done: number }>();
   for (const row of countRows) {
     if (!sprintStats.has(row.sprintZohoId)) {
@@ -1058,12 +1073,12 @@ export async function queryUserSprintHistory(
     }
     const s = sprintStats.get(row.sprintZohoId)!;
     
-    // Handle bigint from SQLite (some DB drivers return BigInt for COUNT)
+    // Handle bigint from SQLite (Prisma's $queryRawUnsafe returns BigInt for COUNT on some drivers)
     const count = typeof row.cnt === 'bigint' ? Number(row.cnt) : Number(row.cnt);
     
     s.assigned += count;
     
-    // Only increment 'done' if statusGroup is 'done' (the bucket, not a specific status)
+    // Only increment 'done' if statusGroup is 'done' (the bucket, not a specific status name)
     if (row.statusGroup === 'done') s.done += count;
   }
 
@@ -1199,16 +1214,17 @@ export async function queryBacklogStats(
     toIssueItem(i, userMap, staleDays, watchedStates),
   );
 
-  // Compute summary
+  // Compute summary: total count, stale count, status group distribution, and assignee workload.
   let staleCount = 0;
   const statusGroups = { todo: 0, doing: 0, done: 0 };
+  // Track assignee counts using a Map keyed by user ID for deduplication.
   const assigneeCounts = new Map<string, { id: string; name: string; role: string; count: number }>();
 
   for (const issue of enrichedIssues) {
     if (issue.isStale) staleCount++;
     statusGroups[issue.statusGroup as 'todo' | 'doing' | 'done']++;
 
-    // Collect assignees
+    // Collect assignees — each assignee gets a count increment for this issue
     for (const assignee of issue.assignees) {
       let entry = assigneeCounts.get(assignee.id);
       if (!entry) {

@@ -16,6 +16,13 @@ import { PrismaClient } from '@prisma/client';
  *   const stats = await prisma.$queryRawUnsafe('SELECT...', parameters);
  */
 
+/**
+ * The singleton Prisma client instance.
+ *
+ * Created once at module load time and reused across the application. This ensures
+ * that all database connections share a single pool, reducing overhead and preventing
+ * connection leaks.
+ */
 const prisma = new PrismaClient();
 
 export default prisma;

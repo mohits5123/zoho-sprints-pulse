@@ -3,40 +3,55 @@ import { fetchUserStats, type UserLoadStat } from '../api/client';
 import { roleColor } from './UserAvatar';
 
 /**
- * Extract first two characters of a name as initials.
- * Used for avatar display.
- * @param name User's full name
- * @returns Uppercase string of first two characters
+ * Extract first two characters of a name as initials for avatar display.
+ * Splits the name on spaces, takes the first character of each word,
+ * joins them, and returns the first two characters uppercased.
+ *
+ * @param name User's full name (e.g. "Jane Doe")
+ * @returns Uppercase initials (e.g. "JD")
  */
 function initials(name: string) {
   return name.split(' ').map((w) => w[0] ?? '').join('').slice(0, 2).toUpperCase();
 }
 
 /**
- * Props for CompletionRow component displaying individual user completion data.
+ * CompletionRow renders a single row in the completion leaderboard.
+ * Displays the user's rank, avatar with role color, name, a color-coded
+ * progress bar, completed/total ticket count, and completion percentage.
+ *
+ * @param user - User load statistics (todo, doing, done counts, name, role, id)
+ * @param rank - User's position in the sorted leaderboard (1-based)
+ * @param onClick - Callback fired when the row is clicked
  */
 function CompletionRow({ user, rank, onClick }: {
-  /** User load statistics */
+  /** User load statistics (todo, doing, done counts, name, role, id) */
   user:    UserLoadStat;
-  /** User's rank in completion leaderboard */
+  /** User's position in the sorted leaderboard (1-based) */
   rank:    number;
-  /** Click handler to navigate to user profile */
+  /** Callback fired when the row is clicked, navigates to user profile */
   onClick: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const total = user.todo + user.doing + user.done;
+
+  // Skip rendering users with zero tickets across all statuses
   if (total === 0) return null;
 
-  // Calculate completion percentage
+  // Completion percentage rounded to nearest integer
   const pct = Math.round((user.done / total) * 100);
 
-  // Colour the bar by completion level (green/good, orange/warning, red/poor)
+  // Bar color encodes completion level:
+  //   green   (>=80%) — good
+  //   blue    (>=50%)  — in progress, on track
+  //   orange  (>=25%)  — warning, behind
+  //   red     (<25%)   — poor, needs attention
   const barColor = pct >= 80 ? '#22c55e' : pct >= 50 ? '#3b82f6' : pct >= 25 ? '#f59e0b' : '#ef4444';
 
   return (
     /* User completion row with rank, avatar, name, progress bar, and stats */
     <div
       style={{
+        // 5-column grid: rank | avatar | name+bar | count | pct
         display: 'grid',
         gridTemplateColumns: '20px 28px 1fr 80px 44px',
         alignItems: 'center',
@@ -44,8 +59,10 @@ function CompletionRow({ user, rank, onClick }: {
         padding: '6px 8px',
         borderRadius: 6,
         cursor: 'pointer',
+        // Hover highlight for interactive rows
         backgroundColor: hovered ? '#263148' : 'transparent',
         borderBottom: '1px solid #1e293b',
+        // Negative margins so hover bg extends full card width
         margin: '0 -8px',
       }}
       onClick={onClick}
@@ -57,12 +74,13 @@ function CompletionRow({ user, rank, onClick }: {
         {rank}
       </span>
 
-      {/* Avatar showing user initials with role color */}
+      {/* Avatar circle showing user initials, colored by role */}
       <div
         style={{
           width: 26, height: 26, borderRadius: '50%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 9, fontWeight: 700, color: '#fff',
+          // Background tint derived from user's role (via roleColor helper)
           backgroundColor: roleColor(user.role), flexShrink: 0,
         }}
         title={user.role}
@@ -88,12 +106,12 @@ function CompletionRow({ user, rank, onClick }: {
         </div>
       </div>
 
-      {/* Completed tickets / total tickets */}
+      {/* Completed / total ticket count (e.g. "12 / 20") */}
       <span style={{ fontSize: 11, color: '#64748b', textAlign: 'right' as const, fontVariantNumeric: 'tabular-nums' }}>
         {user.done} / {total}
       </span>
 
-      {/* Completion percentage */}
+      {/* Completion percentage, color-coded to match barColor */}
       <span style={{
         fontSize: 13, fontWeight: 700, textAlign: 'right' as const,
         color: barColor, fontVariantNumeric: 'tabular-nums',
@@ -120,7 +138,7 @@ export function UserCompletionCard({ projectId, sprintId, staleDays = 7, onUserC
   staleDays?:  number;
   onUserClick: (userId: string, userName: string) => void;
 }) {
-  // State for fetching and displaying user completion statistics
+  // Reactive state: refetches whenever projectId, sprintId, or staleDays change
   const [users, setUsers]     = useState<UserLoadStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
@@ -133,7 +151,8 @@ export function UserCompletionCard({ projectId, sprintId, staleDays = 7, onUserC
       .finally(() => setLoading(false));
   }, [projectId, sprintId, staleDays]);
 
-  // Sort users by completion % descending, then by total tickets as tiebreaker
+  // Sort: highest completion % first, then by total ticket count (descending) as tiebreaker.
+  // Filters out "Unknown" assignees and users with zero tickets.
   const sorted = [...users]
     .filter((u) => u.name !== 'Unknown' && u.todo + u.doing + u.done > 0)
     .sort((a, b) => {
@@ -144,7 +163,8 @@ export function UserCompletionCard({ projectId, sprintId, staleDays = 7, onUserC
       return pb - pa || tb - ta;
     });
 
-  // Calculate average completion percentage across all users
+  // Average completion percentage across all displayed users (rounded).
+  // Excludes users with zero tickets from the average to avoid skewing.
   const avgPct = sorted.length > 0
     ? Math.round(sorted.reduce((s, u) => {
         const t = u.todo + u.doing + u.done;
@@ -156,12 +176,14 @@ export function UserCompletionCard({ projectId, sprintId, staleDays = 7, onUserC
     <div style={s.card}>
       {/* Header with title, team stats, and overall completion percentage */}
       <div style={s.headerRow}>
+        {/* Section title with contributor count and team average */}
         <div>
           <p style={s.label}>Completion Rate</p>
           {!loading && sorted.length > 0 && (
             <p style={s.sub}>{sorted.length} contributors · team avg {avgPct}%</p>
           )}
         </div>
+        {/* Large team average percentage, color-coded: green (>=60%), orange (>=30%), red (<30%) */}
         {!loading && sorted.length > 0 && (
           <span style={{
             fontSize: 22, fontWeight: 800,
@@ -173,7 +195,7 @@ export function UserCompletionCard({ projectId, sprintId, staleDays = 7, onUserC
         )}
       </div>
 
-      {/* Column headers for the leaderboard table */}
+      {/* Fixed column headers matching the 5-column grid layout: Rank | (empty) | Name | Count | Rate */}
       {!loading && sorted.length > 0 && (
         <div style={{
           display: 'grid',
@@ -190,7 +212,10 @@ export function UserCompletionCard({ projectId, sprintId, staleDays = 7, onUserC
         </div>
       )}
 
-      {/* Leaderboard rows or loading/error messages */}
+      {/*
+     * Leaderboard content: loading indicator, error message, empty state,
+     * or mapped CompletionRow components for each user.
+     */}
       <div style={s.list}>
         {loading && <p style={s.muted}>Loading…</p>}
         {error   && <p style={s.muted}>Failed to load: {error}</p>}
@@ -211,20 +236,27 @@ export function UserCompletionCard({ projectId, sprintId, staleDays = 7, onUserC
 }
 
 const s: Record<string, React.CSSProperties> = {
+  /**
+   * Main card container: dark background, rounded corners, 2-column grid span.
+   * Flex column layout with internal gap spacing.
+   */
   card: {
-    /** Main card styling with dark theme */
     backgroundColor: '#1e293b', border: '1px solid #334155',
     borderRadius: 12, padding: '20px 22px',
     display: 'flex', flexDirection: 'column', gap: 10,
     gridColumn: 'span 2',
   },
+  /** Header row: label on the left, large average percentage on the right */
   headerRow: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' },
+  /** Uppercase section label with subtle letter-spacing */
   label: {
-    /** Section label styling */
     margin: 0, fontSize: 11, fontWeight: 600,
     color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em',
   },
+  /** Sub-label text (e.g. contributor count and team average) */
   sub: { margin: '2px 0 0', fontSize: 11, color: '#475569' },
+  /** Vertical list container for column headers and rows */
   list: { display: 'flex', flexDirection: 'column' },
+  /** Muted text for loading, error, and empty-state messages */
   muted: { margin: 0, color: '#475569', fontSize: 13 },
 };
