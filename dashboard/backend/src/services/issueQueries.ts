@@ -1023,12 +1023,10 @@ export async function queryUserIssues(
  */
 export async function queryUserSprintHistory(
   userZohoId:  string,
-  sprintLimit: number = 12,
 ): Promise<SprintHistoryItem[]> {
-  // Fetch recent sprints (up to sprintLimit), ordered by updatedAt descending
+  // Fetch all sprints, ordered by updatedAt descending
   const sprints = await prisma.sprint.findMany({
     orderBy: { updatedAt: 'desc' },
-    take: sprintLimit,
   });
 
   if (sprints.length === 0) return [];

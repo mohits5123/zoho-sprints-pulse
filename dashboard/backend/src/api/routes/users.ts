@@ -36,7 +36,7 @@ router.get('/', async (_req, res) => {
     res.json({ users, total: users.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Users list failed:', msg);
+    console.error('Users list failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
   }
 });
@@ -96,7 +96,7 @@ router.get('/:id/profile', async (req, res) => {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ user profile failed:', msg);
+    console.error('user profile failed:', msg);
     res.status(500).json({ error: msg });
   }
 });
@@ -119,16 +119,15 @@ router.get('/:id/profile', async (req, res) => {
  */
 router.get('/:id/sprint-history', async (req, res) => {
   try {
-    const limit = Math.min(20, Math.max(1, parseInt(String(req.query.limit ?? '12'), 10) || 12));
     const user = await prisma.user.findUnique({ where: { zohoId: req.params.id } });
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
     // Single DB query — no Zoho calls
-    const history = await queryUserSprintHistory(user.zohoId, limit);
+    const history = await queryUserSprintHistory(user.zohoId);
     res.json({ history, total: history.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ sprint-history failed:', msg);
+    console.error('sprint-history failed:', msg);
     res.status(500).json({ error: msg });
   }
 });
@@ -176,7 +175,7 @@ router.post('/sync', async (_req, res) => {
     const message  = axios.isAxiosError(err)
       ? `Zoho API ${err.response?.status ?? 'error'} at ${err.config?.url}: ${JSON.stringify(zohoBody ?? err.message)}`
       : (err instanceof Error ? err.message : 'Unknown error');
-    console.error('❌ Sync failed:', message);
+    console.error('Sync failed:', message);
     res.status(500).json({ error: message });
   }
 });
@@ -212,7 +211,7 @@ router.patch('/:id/role', async (req, res) => {
     res.json({ user });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Role update failed:', msg);
+    console.error('Role update failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
   }
 });

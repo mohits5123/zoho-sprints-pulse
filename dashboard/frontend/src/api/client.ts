@@ -892,7 +892,6 @@ export interface SprintHistoryItem {
  * Fetch a user's sprint history.
  *
  * @param userId - The user ID to fetch history for.
- * @param limit - Maximum number of sprints to return (default 12).
  *
  * @returns Array of sprint history items with completion percentages.
  *
@@ -900,8 +899,8 @@ export interface SprintHistoryItem {
  * Used for displaying a user's contribution history across sprints.
  * Shows tasks they were assigned to, completion status, and sprint outcomes.
  */
-export async function fetchUserSprintHistory(userId: string, limit: number = 12): Promise<{ history: SprintHistoryItem[]; total: number }> {
-  const res = await apiClient.get<{ history: SprintHistoryItem[]; total: number }>(`/users/${userId}/sprint-history`, { params: { limit } });
+export async function fetchUserSprintHistory(userId: string): Promise<{ history: SprintHistoryItem[]; total: number }> {
+  const res = await apiClient.get<{ history: SprintHistoryItem[]; total: number }>(`/users/${userId}/sprint-history`);
   return res.data;
 }
 
