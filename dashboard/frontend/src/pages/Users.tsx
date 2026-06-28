@@ -61,6 +61,7 @@ export function Users() {
   const [loadMeta, setLoadMeta]     = useState<{ sprintCount: number; projectCount: number } | null>(null);
   const [loading, setLoading]       = useState(true);
   const [loadFetching, setLoadFetching] = useState(true);
+  const [search, setSearch]         = useState('');
 
   // Fetch users from Zoho and sort them by role order (DEV → QA → PROD → OTHER).
   // This runs once on mount.
@@ -204,25 +205,51 @@ export function Users() {
           <p style={s.muted}>No users found. Go back and sync your team first.</p>
         )}
 
-        {/* User cards grid — each card shows avatar, name, role badge, WIP, and stale count. */}
+        {/* Search bar — shown once users are loaded. */}
         {!loading && users.length > 0 && (
-          <div style={s.grid}>
-            {users.map((user) => {
-              // Look up per-user stats from local team load data.
-              const stat = loadMap.get(user.zohoId);
-              return (
-                <UserCard
-                  key={user.zohoId}
-                  user={user}
-                  wip={stat ? stat.todo + stat.doing : 0}
-                  staleCount={stat?.stale ?? 0}
-                  onRoleChange={handleRoleChange}
-                  onClick={() => navigate(`/users/${user.zohoId}`)}
-                />
-              );
-            })}
+          <div style={s.searchWrap}>
+            
+            <input
+              style={s.searchInput}
+              type="text"
+              placeholder="Search by name…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              autoComplete="off"
+            />
+            {search && (
+              <button style={s.searchClear} onClick={() => setSearch('')} title="Clear search">x</button>
+            )}
           </div>
         )}
+
+        {/* User cards grid — each card shows avatar, name, role badge, WIP, and stale count. */}
+        {!loading && users.length > 0 && (() => {
+          const q = search.trim().toLowerCase();
+          const filtered = q
+            ? users.filter((u) => u.name.toLowerCase().includes(q))
+            : users;
+          if (filtered.length === 0) {
+            return <p style={s.muted}>No users match "{search}".</p>;
+          }
+          return (
+            <div style={s.grid}>
+              {filtered.map((user) => {
+                const stat = loadMap.get(user.zohoId);
+                return (
+                  <UserCard
+                    key={user.zohoId}
+                    user={user}
+                    wip={stat ? stat.todo + stat.doing : 0}
+                    staleCount={stat?.stale ?? 0}
+                    onRoleChange={handleRoleChange}
+                    onClick={() => navigate(`/users/${user.zohoId}`)}
+                  />
+                );
+              })}
+            </div>
+          );
+        })()}
       </main>
     </div>
   );
@@ -318,4 +345,39 @@ const s: Record<string, React.CSSProperties> = {
   },
   /** Muted text for loading/empty states. */
   muted: { color: '#64748b', fontSize: 14 },
+  /** Search bar wrapper — sits above the grid, below the stats row. */
+  searchWrap: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 20,
+    backgroundColor: '#1e293b',
+    border: '1px solid #334155',
+    borderRadius: 10,
+    padding: '8px 12px',
+    maxWidth: '100%',
+  },
+  /** Search icon inside the bar. */
+  searchIcon: { fontSize: 14, userSelect: 'none' as const, flexShrink: 0 },
+  /** Text input for the search query. */
+  searchInput: {
+    flex: 1,
+    background: 'transparent',
+    border: 'none',
+    outline: 'none',
+    color: '#f1f5f9',
+    fontSize: 14,
+    fontFamily: 'inherit',
+  },
+  /** Clear (x) button inside the search bar. */
+  searchClear: {
+    background: 'none',
+    border: 'none',
+    color: '#475569',
+    fontSize: 12,
+    cursor: 'pointer',
+    padding: '0 2px',
+    lineHeight: 1,
+    flexShrink: 0,
+  },
 };
