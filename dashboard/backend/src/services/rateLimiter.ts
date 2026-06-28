@@ -108,7 +108,7 @@ class ZohoRateLimiter {
     // Window full — wait for it to expire before making request
     if (this.windowCount >= this.limit) {
       const waitMs = this.windowMs - (now - this.windowStart) + 100;
-      console.log(`⏳ Rate limit (${this.limit} req/min) — waiting ${Math.ceil(waitMs / 1000)}s for next window...`);
+      console.log(`Rate limit (${this.limit} req/min) — waiting ${Math.ceil(waitMs / 1000)}s for next window...`);
       await sleep(waitMs);
       this.windowStart = Date.now();
       this.windowCount = 0;
@@ -168,7 +168,7 @@ class ZohoRateLimiter {
    * diagnostics and monitoring.
    */
   printSummary(): void {
-    console.log(`\n📊 Zoho Sync Summary:`);
+    console.log(`\nZoho Sync Summary:`);
     console.log(`   Total requests sent:  ${this.sent}`);
     console.log(`   Successful responses: ${this.ok}`);
     console.log(`   Failed requests:      ${this.failed}\n`);

@@ -39,11 +39,11 @@ import apiRouter from './api/router';
  */
 async function executeFullSync(): Promise<void> {
   try {
-    console.log('⏱  Full sync starting…');
+    console.log('Full sync starting…');
     await runFullSync();
-    console.log('✅ Full sync complete');
+    console.log('Full sync complete');
   } catch (err) {
-    console.error('⚠️  Full sync failed:', err instanceof Error ? err.message : err);
+    console.error('Full sync failed:', err instanceof Error ? err.message : err);
   }
 }
 
@@ -62,7 +62,7 @@ async function executeFullSync(): Promise<void> {
  * process exits with a non-zero status code.
  */
 async function bootstrap(): Promise<void> {
-  console.log('🚀 Zonaliser starting...');
+  console.log('Zonaliser starting...');
 
   // Authenticate with Zoho and resolve OAuth tokens before accepting requests.
   await initAuth();
@@ -77,7 +77,7 @@ async function bootstrap(): Promise<void> {
   app.use('/api', apiRouter);
 
   app.listen(config.port, () => {
-    console.log(`🌐 API server running at http://localhost:${config.port}`);
+    console.log(`API server running at http://localhost:${config.port}`);
     console.log(`   Health: http://localhost:${config.port}/api/health`);
     console.log(`   Status: http://localhost:${config.port}/api/status`);
     console.log(`   Auto-sync: every hour (cron: '0 * * * *')`);
@@ -86,7 +86,7 @@ async function bootstrap(): Promise<void> {
     // The sync routine itself includes a rate limiter (≤25 req/min) to
     // avoid exceeding Zoho's API quota and getting locked out.
     cron.schedule('0 * * * *', () => {
-      console.log('⏰ Scheduled sync triggered by cron');
+      console.log('Scheduled sync triggered by cron');
       executeFullSync().catch(console.error);
     });
   });
@@ -96,7 +96,7 @@ async function bootstrap(): Promise<void> {
 // process so that a process manager (e.g. PM2, systemd, Docker) can handle
 // the restart. Missing environment variables are the most common cause.
 bootstrap().catch((err: Error) => {
-  console.error('\n❌ Startup failed:', err.message);
+  console.error('\nStartup failed:', err.message);
   console.error('   Check your ~/.zshrc environment variables.\n');
   process.exit(1);
 });

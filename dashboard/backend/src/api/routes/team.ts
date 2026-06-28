@@ -43,7 +43,7 @@ router.get('/load', async (req, res) => {
     res.json({ users, sprintCount, projectCount, staleDays });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ team/load failed:', msg);
+    console.error('team/load failed:', msg);
     res.status(500).json({ error: msg });
   }
 });

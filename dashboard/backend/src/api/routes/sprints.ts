@@ -46,7 +46,7 @@ router.get('/', async (_req, res) => {
     res.json({ sprints, total: sprints.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Sprints list failed:', msg);
+    console.error('Sprints list failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
   }
 });
@@ -246,7 +246,7 @@ router.get('/debug/:projectId', async (req, res) => {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error('❌ Debug endpoint failed:', msg);
+    console.error('Debug endpoint failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
@@ -285,13 +285,13 @@ router.post('/sync', async (_req, res) => {
   setImmediate(async () => {
     try {
       await runFullSync();
-      console.log('✅ Background full sync complete');
+      console.log('Background full sync complete');
     } catch (err) {
       const zohoBody = axios.isAxiosError(err) ? err.response?.data : undefined;
       const message  = axios.isAxiosError(err)
         ? `Zoho API ${err.response?.status ?? 'error'} at ${err.config?.url}: ${JSON.stringify(zohoBody ?? err.message)}`
         : (err instanceof Error ? err.message : 'Unknown error');
-      console.error('❌ Full sync failed:', message);
+      console.error('Full sync failed:', message);
     }
   });
 });
@@ -355,7 +355,7 @@ router.post('/fetch-past', async (req, res) => {
     res.json({ sprints: sprintNames });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error('❌ Fetch past sprints failed:', msg);
+    console.error('Fetch past sprints failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
@@ -389,7 +389,7 @@ router.patch('/:id/display', async (req, res) => {
     res.json({ sprint });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Display settings update failed:', msg);
+    console.error('Display settings update failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
   }
 });

@@ -73,7 +73,7 @@ router.get('/', async (_req, res) => {
     res.json({ projects: projectsWithSprints, total: projects.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Projects list failed:', msg);
+    console.error('Projects list failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
   }
 });
@@ -110,13 +110,13 @@ router.post('/sync', async (_req, res) => {
   setImmediate(async () => {
     try {
       await runFullSync();
-      console.log('✅ Background full sync complete');
+      console.log('Background full sync complete');
     } catch (err) {
       const zohoBody = axios.isAxiosError(err) ? err.response?.data : undefined;
       const message  = axios.isAxiosError(err)
         ? `Zoho API ${err.response?.status ?? 'error'} at ${err.config?.url}: ${JSON.stringify(zohoBody ?? err.message)}`
         : (err instanceof Error ? err.message : 'Unknown error');
-      console.error('❌ Full sync failed:', message);
+      console.error('Full sync failed:', message);
     }
   });
 });
@@ -153,7 +153,7 @@ router.patch('/:id/board-type', async (req, res) => {
     res.json({ project });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Board type update failed:', msg);
+    console.error('Board type update failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
   }
 });
@@ -186,7 +186,7 @@ router.patch('/:id/display', async (req, res) => {
     res.json({ project });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Display settings update failed:', msg);
+    console.error('Display settings update failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
   }
 });
@@ -225,7 +225,7 @@ router.post('/reorder', async (req, res) => {
     res.json({ reordered: orderedIds.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Project reorder failed:', msg);
+    console.error('Project reorder failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
   }
 });
@@ -276,7 +276,7 @@ router.get('/:id/sprints/:sprintId/issues', async (req, res) => {
     res.json({ issues });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Issue fetch failed:', msg);
+    console.error('Issue fetch failed:', msg);
     res.status(500).json({ error: msg });
   }
 });
@@ -317,7 +317,7 @@ router.get('/:id/sprints/:sprintId/epics', async (req, res) => {
     res.json({ epics, statusGroups });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Epic fetch failed:', msg);
+    console.error('Epic fetch failed:', msg);
     res.status(500).json({ error: msg });
   }
 });
@@ -380,7 +380,7 @@ router.get('/:id/sprints/:sprintId/raiser-stats', async (req, res) => {
     res.json({ raisers });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Raiser stats fetch failed:', msg);
+    console.error('Raiser stats fetch failed:', msg);
     res.status(500).json({ error: msg });
   }
 });
@@ -439,7 +439,7 @@ router.get('/:id/kanban-raiser-stats', async (req, res) => {
     res.json({ raisers });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Kanban raiser stats fetch failed:', msg);
+    console.error('Kanban raiser stats fetch failed:', msg);
     res.status(500).json({ error: msg });
   }
 });
@@ -527,7 +527,7 @@ router.get('/:id/sprints/:sprintId/user-stats', async (req, res) => {
     res.json({ users, totalStaleIssues });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ User stats fetch failed:', msg);
+    console.error('User stats fetch failed:', msg);
     res.status(500).json({ error: msg });
   }
 });
@@ -565,7 +565,7 @@ router.get('/:id', async (req, res) => {
     res.json({ project: { ...project, projNo: extractProjNo(project.rawData), activeSprints } });
    } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Project fetch failed:', msg);
+    console.error('Project fetch failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
   }
 });
@@ -620,7 +620,7 @@ router.get('/:id/kanban/issues', async (req, res) => {
     res.json({ issues: filtered });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Kanban issue fetch failed:', msg);
+    console.error('Kanban issue fetch failed:', msg);
     res.status(500).json({ error: msg });
   }
 });
@@ -710,7 +710,7 @@ router.get('/:id/kanban-user-stats', async (req, res) => {
     res.json({ users, totalStaleIssues });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Kanban user stats fetch failed:', msg);
+    console.error('Kanban user stats fetch failed:', msg);
     res.status(500).json({ error: msg });
   }
 });
@@ -757,7 +757,7 @@ router.get('/:id/kanban/stale-count', async (req, res) => {
     res.json({ staleCount: staleSet.size });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Kanban stale count fetch failed:', msg);
+    console.error('Kanban stale count fetch failed:', msg);
     res.status(500).json({ error: msg });
   }
 });
@@ -812,7 +812,7 @@ router.get('/:id/backlog/issues', async (req, res) => {
     res.json({ issues: filtered });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Backlog issue fetch failed:', msg);
+    console.error('Backlog issue fetch failed:', msg);
     res.status(500).json({ error: msg });
   }
 });
@@ -850,7 +850,7 @@ router.get('/:id/backlog-stats', async (req, res) => {
     res.json(stats);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Backlog stats fetch failed:', msg);
+    console.error('Backlog stats fetch failed:', msg);
     res.status(500).json({ error: msg });
   }
 });

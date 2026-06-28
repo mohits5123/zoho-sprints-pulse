@@ -108,7 +108,7 @@ export async function fetchZohoUsers(): Promise<ZohoUser[]> {
   const teamId  = await resolveTeamId();
   const usersUrl = `${config.zoho.apiBaseUrl}/team/${teamId}/users/`;
 
-  console.log('\n👥 Syncing users');
+  console.log('\nSyncing users');
 
   // Reset stats for this sync run
   zohoThrottle.resetStats();
@@ -130,7 +130,7 @@ export async function fetchZohoUsers(): Promise<ZohoUser[]> {
     const userJObj = raw?.userJObj as Record<string, unknown[]> | undefined;
 
     if (!userJObj) {
-      console.warn('⚠️  userJObj missing from response');
+      console.warn('userJObj missing from response');
       break;
     }
 

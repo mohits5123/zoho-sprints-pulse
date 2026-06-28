@@ -126,10 +126,10 @@ function scheduleRefresh(): void {
     try {
       tokenState = await fetchNewToken();
       const expiresInMin = Math.round((tokenState.expiresAt - Date.now()) / 60_000);
-      console.log(`🔄 Zoho token refreshed — expires in ${expiresInMin} min`);
+      console.log(`Zoho token refreshed — expires in ${expiresInMin} min`);
       scheduleRefresh();  // Keep scheduling refreshes while running
     } catch (err) {
-      console.error('❌ Token auto-refresh failed:', (err as Error).message);
+      console.error('Token auto-refresh failed:', (err as Error).message);
       // Retry in 60 seconds if refresh fails
       setTimeout(scheduleRefresh, 60_000);
     }
@@ -169,7 +169,7 @@ function scheduleRefresh(): void {
 export async function initAuth(): Promise<void> {
   tokenState = await fetchNewToken();
   const expiresInMin = Math.round((tokenState.expiresAt - Date.now()) / 60_000);
-  console.log(`✅ Zoho token acquired — expires in ${expiresInMin} min`);
+  console.log(`Zoho token acquired — expires in ${expiresInMin} min`);
   scheduleRefresh();  // Start periodic refresh
 }
 

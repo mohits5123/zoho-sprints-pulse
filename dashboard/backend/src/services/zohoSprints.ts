@@ -961,7 +961,7 @@ async function syncIssues(
   // Get the project's statusMap from DB (populated by syncStatusMapFromZoho earlier)
   const project = await prisma.project.findUnique({ where: { zohoId: projectZohoId } });
   if (!project?.statusMap) {
-    console.log(`  ⚠️  No statusMap for project ${projectZohoId}, skipping issues`);
+    console.log(`  No statusMap for project ${projectZohoId}, skipping issues`);
     return 0;
   }
 
@@ -975,7 +975,7 @@ async function syncIssues(
     statusNameMap  = parsed.map ?? {};
     statusGroupMap = parsed.statusGroups ?? {};
   } catch {
-    console.log(`  ⚠️  Could not parse statusMap for project ${projectZohoId}`);
+    console.log(`  Could not parse statusMap for project ${projectZohoId}`);
     return 0;
   }
 
@@ -1282,7 +1282,7 @@ export async function syncAll(): Promise<number> {
   const scrumProjects  = allProjects.filter((p) => p.boardType === 'scrum');
   const kanbanProjects = allProjects.filter((p) => p.boardType === 'kanban');
 
-  console.log(`\n🏃 Syncing ${scrumProjects.length} scrum + ${kanbanProjects.length} kanban projects`);
+  console.log(`\nSyncing ${scrumProjects.length} scrum + ${kanbanProjects.length} kanban projects`);
 
   let synced = 0;
 
@@ -1303,7 +1303,7 @@ export async function syncAll(): Promise<number> {
    */
   for (const project of scrumProjects) {
     try {
-      console.log(`▶ [scrum] ${project.name}`);
+      console.log(`[scrum] ${project.name}`);
       
       // Phase 3a: Sync epics
       await syncEpics(teamId, project.zohoId);
@@ -1439,7 +1439,7 @@ export async function syncAll(): Promise<number> {
             .reduce((sum, [, n]) => sum + n, 0);
           await recordBurndownSnapshot(completed.zohoId, doneCount, totalTickets);
         } catch (err) {
-          console.error(`  ❌ Failed to sync completed sprint ${completed.zohoId}:`, err instanceof Error ? err.message : err);
+          console.error(`  Failed to sync completed sprint ${completed.zohoId}:`, err instanceof Error ? err.message : err);
         }
       }
 
@@ -1452,7 +1452,7 @@ export async function syncAll(): Promise<number> {
         },
       });
     } catch (err) {
-      console.error(`  ❌ Failed for ${project.name}:`, err instanceof Error ? err.message : err);
+      console.error(`  Failed for ${project.name}:`, err instanceof Error ? err.message : err);
     }
   }
 
@@ -1471,7 +1471,7 @@ export async function syncAll(): Promise<number> {
    */
   for (const project of kanbanProjects) {
     try {
-      console.log(`▶ [kanban] ${project.name}`);
+      console.log(`[kanban] ${project.name}`);
       
       // Phase 3a: Sync epics from Zoho to local Epic table
       await syncEpics(teamId, project.zohoId);
@@ -1580,7 +1580,7 @@ export async function syncAll(): Promise<number> {
 
       synced++;  // Count this project as successfully processed
     } catch (err) {
-      console.error(`  ❌ Failed for ${project.name}:`, err instanceof Error ? err.message : err);
+      console.error(`  Failed for ${project.name}:`, err instanceof Error ? err.message : err);
       // Continue with other projects even if this one fails
     }
   }

@@ -29,7 +29,7 @@ router.get('/', async (_req, res) => {
   } catch (err) {
     // Guard against non-Error objects thrown via `throw 'string'`
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Sync status read failed:', msg);
+    console.error('Sync status read failed:', msg);
     res.status(500).json({ error: 'Failed to read sync status' });
   }
 });
@@ -52,7 +52,7 @@ router.get('/progress', async (_req, res) => {
   } catch (err) {
     // Guard against non-Error objects thrown via `throw 'string'`
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Sync progress read failed:', msg);
+    console.error('Sync progress read failed:', msg);
     res.status(500).json({ error: 'Failed to read sync progress' });
   }
 });

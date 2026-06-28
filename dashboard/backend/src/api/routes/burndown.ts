@@ -53,7 +53,7 @@ router.get('/', async (req: Request<{ sprintZohoId: string }>, res) => {
     res.json({ snapshots });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('❌ Burndown fetch failed:', msg);
+    console.error('Burndown fetch failed:', msg);
     res.status(500).json({ error: 'Failed to load burndown data' });
   }
 });

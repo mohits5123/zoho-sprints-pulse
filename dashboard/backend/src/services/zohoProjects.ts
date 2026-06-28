@@ -91,7 +91,7 @@ export async function fetchZohoProjects(): Promise<ZohoProject[]> {
   // All projects endpoint (not filtered by board type)
   const url    = `${config.zoho.apiBaseUrl}/team/${teamId}/projects/`;
 
-  console.log('\n📦 Syncing projects');
+  console.log('\nSyncing projects');
   
   // Reset stats for this sync run
   zohoThrottle.resetStats();
