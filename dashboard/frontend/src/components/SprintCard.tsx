@@ -140,7 +140,7 @@ export function SprintCard({ sprint, hideProjectName, staleCount, onStatusClick,
         <h3 style={s.sprintName}>{sprint.name}</h3>
         <div style={s.headerRight}>
           {allDone && (
-            <span style={s.doneBadge} title="All tickets done">✓ Done</span>
+            <span style={s.doneBadge} title="All tickets done">Done</span>
           )}
           {!allDone && (staleCount ?? 0) > 0 && (
             <span
@@ -148,7 +148,7 @@ export function SprintCard({ sprint, hideProjectName, staleCount, onStatusClick,
               onClick={onStaleClick}
               title={`${staleCount} stale ticket${staleCount !== 1 ? 's' : ''} in this sprint`}
             >
-              ⚠ {staleCount} stale
+              {staleCount} stale
             </span>
           )}
           <span style={{ ...s.statusPill, color: sprintStatusColor, borderColor: `${sprintStatusColor}44`, backgroundColor: `${sprintStatusColor}11` }}>
@@ -179,7 +179,7 @@ export function SprintCard({ sprint, hideProjectName, staleCount, onStatusClick,
       </div>
 
       {(startFmt || endFmt) && (
-        <p style={s.dates}>{startFmt ?? '?'} → {endFmt ?? '?'}</p>
+        <p style={s.dates}>{startFmt ?? '?'} - {endFmt ?? '?'}</p>
       )}
 
       {users && users.length > 0 && (

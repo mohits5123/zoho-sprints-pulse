@@ -268,9 +268,9 @@ export function SprintHealth() {
     <div style={s.page}>
       <header style={s.header}>
         <div style={s.headerLeft}>
-          <button style={s.back} onClick={() => navigate('/')}>← Back</button>
+          <button style={s.back} onClick={() => navigate('/')}>Back</button>
           <div>
-            <h1 style={s.title}>🏃 Sprints</h1>
+            <h1 style={s.title}>Sprints</h1>
             <p style={s.subtitle}>
               {visibleCount > 0
                 ? `${visibleCount} visible sprint${visibleCount !== 1 ? 's' : ''}${hiddenSprints.length > 0 ? ` · ${hiddenSprints.length} hidden` : ''}`
@@ -341,7 +341,7 @@ export function SprintHealth() {
               <hr style={s.divider} />
               <div style={s.hiddenSection}>
                 <button style={s.hiddenToggle} onClick={() => setHiddenOpen((o) => !o)}>
-                  {hiddenOpen ? '▾' : '▸'} Hidden sprints ({hiddenSprints.length})
+                  {hiddenOpen ? 'v' : '>'} Hidden sprints ({hiddenSprints.length})
                 </button>
                 {hiddenOpen && (
                   <div style={s.grid}>
@@ -397,7 +397,7 @@ export function SprintHealth() {
             {selectedProject && (
               <div style={s.modalBody}>
                 <button style={s.backBtn} onClick={() => { setSelectedProject(''); setPastSprintNames([]); setSelectedPastSprints(new Set()); }}>
-                  ← Back to projects
+                  Back to projects
                 </button>
                 {loadingPast && <p style={s.muted}>Loading past sprints…</p>}
                 {!loadingPast && pastSprintNames.length === 0 && (
@@ -415,7 +415,7 @@ export function SprintHealth() {
                             onChange={() => togglePastSprint(sp.zohoId)}
                           />
                           <span style={s.sprintName}>{sp.name}</span>
-                          <span style={s.sprintMeta}>{formatDate(sp.startDate)} → {formatDate(sp.endDate)}</span>
+                          <span style={s.sprintMeta}>{formatDate(sp.startDate)} - {formatDate(sp.endDate)}</span>
                         </label>
                       ))}
                     </div>

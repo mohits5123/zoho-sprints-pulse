@@ -181,7 +181,7 @@ export function IssueListPage() {
     <div style={s.page}>
       <header style={s.header}>
         <div style={s.headerLeft}>
-          <button style={s.back} onClick={() => navigate(-1)}>← Back</button>
+          <button style={s.back} onClick={() => navigate(-1)}>Back</button>
           <div>
             <h1 style={s.title}>{title}</h1>
             {subtitle && <p style={s.subtitle}>{subtitle}</p>}
@@ -316,7 +316,7 @@ function IssueRow({
           onClick={(e) => { e.stopPropagation(); onCopy(zohoUrl ?? `#${issue.itemNo}`, issue.itemNo); }}
           title={zohoUrl ? 'Copy Zoho URL' : 'Copy issue ID'}
         >
-          {copied === issue.itemNo ? '✓' : '⧉'}
+          {copied === issue.itemNo ? 'Copied' : 'Copy'}
         </button>
       </div>
 

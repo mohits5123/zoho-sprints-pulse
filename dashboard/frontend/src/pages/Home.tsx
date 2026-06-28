@@ -183,8 +183,8 @@ export function Home() {
           >
             <div style={s.cardHeader}>
               <div>
-                <h2 style={s.cardTitle}>👥 Team</h2>
-                {usersSynced && <p style={s.cardHint}>Click to view all members →</p>}
+                <h2 style={s.cardTitle}>Team</h2>
+                {usersSynced && <p style={s.cardHint}>Click to view all members</p>}
               </div>
               {usersSynced && (
                 <button style={s.resyncBtn} onClick={handleSyncUsers} disabled={syncingUsers}>
@@ -218,8 +218,8 @@ export function Home() {
           >
             <div style={s.cardHeader}>
               <div>
-                <h2 style={s.cardTitle}>🗂 Projects</h2>
-                {projSynced && <p style={s.cardHint}>Click to view all projects →</p>}
+                <h2 style={s.cardTitle}>Projects</h2>
+                {projSynced && <p style={s.cardHint}>Click to view all projects</p>}
               </div>
               {projSynced && (
                 <button style={s.resyncBtn} onClick={handleSyncProjects} disabled={syncingProjects}>
@@ -255,8 +255,8 @@ export function Home() {
           >
             <div style={s.cardHeader}>
               <div>
-                <h2 style={s.cardTitle}>🏃 Sprints</h2>
-                {sprintsSynced && <p style={s.cardHint}>Click to view all sprints →</p>}
+                <h2 style={s.cardTitle}>Sprints</h2>
+                {sprintsSynced && <p style={s.cardHint}>Click to view all sprints</p>}
               </div>
               {sprintsSynced && (
                 <button style={s.resyncBtn} onClick={handleSyncSprints} disabled={syncingSprints}>

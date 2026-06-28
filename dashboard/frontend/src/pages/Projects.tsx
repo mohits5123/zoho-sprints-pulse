@@ -245,7 +245,7 @@ function ProjectCard({
                   style={s.dropdownItem}
                   onClick={() => { setMenuOpen(false); onHide(project.zohoId); }}
                 >
-                  🙈 Hide project
+                  Hide project
                 </button>
               </div>
             )}
@@ -506,9 +506,9 @@ export function Projects() {
     <div style={s.page}>
       <header style={s.header}>
         <div style={s.headerLeft}>
-          <button style={s.back} onClick={() => navigate('/')}>← Back</button>
+          <button style={s.back} onClick={() => navigate('/')}>Back</button>
           <div>
-            <h1 style={s.title}>🗂 Projects</h1>
+            <h1 style={s.title}>Projects</h1>
             <p style={s.subtitle}>{projects.length} projects synced from Zoho Sprints</p>
           </div>
         </div>
@@ -554,7 +554,7 @@ export function Projects() {
       {!loading && hidden.length > 0 && (
         <div style={s.hiddenSection}>
           <button style={s.hiddenToggle} onClick={() => setHiddenOpen((o) => !o)}>
-            {hiddenOpen ? '▾' : '▸'} Hidden projects ({hidden.length})
+            {hiddenOpen ? 'v' : '>'} Hidden projects ({hidden.length})
           </button>
           {hiddenOpen && (
             <div style={s.grid}>

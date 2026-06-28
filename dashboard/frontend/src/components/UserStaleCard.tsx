@@ -428,7 +428,7 @@ export function UserStaleCard({
             onClick={onStaleClick}
             title={`${totalStaleIssues} stale ticket${totalStaleIssues !== 1 ? 's' : ''} across all users`}
           >
-            ⚠ {totalStaleIssues} stale
+            {totalStaleIssues} stale
           </span>
         )}
       </div>

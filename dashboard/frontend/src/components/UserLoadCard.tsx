@@ -211,7 +211,7 @@ export function UserLoadCard({ projectId, sprintId, staleDays = 7, onUserClick, 
           )}
         </div>
         {overloaded > 0 && (
-          <span style={s.warnPill}>⚠ {overloaded} overloaded</span>
+          <span style={s.warnPill}>{overloaded} overloaded</span>
         )}
       </div>
 

@@ -215,9 +215,9 @@ export function TicketRaiserCard({ projectId, sprintId, boardType, onUserClick }
           <span />
           <span>Raiser</span>
           <div style={{ display: 'flex', gap: 8 }}>
-            <span style={{ width: 18, textAlign: 'center' as const }}>◻</span>
-            <span style={{ width: 18, textAlign: 'center' as const }}>▶</span>
-            <span style={{ width: 18, textAlign: 'center' as const }}>✓</span>
+            <span style={{ width: 18, textAlign: 'center' as const }}>[ ]</span>
+            <span style={{ width: 18, textAlign: 'center' as const }}>>  </span>
+            <span style={{ width: 18, textAlign: 'center' as const }}>ok</span>
             <span style={{ width: 22, textAlign: 'right' as const }}>Tot</span>
           </div>
         </div>

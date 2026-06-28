@@ -145,7 +145,7 @@ export function BacklogPage() {
     <div style={s.page}>
       <header style={s.header}>
         <div style={s.headerLeft}>
-          <button style={s.back} onClick={() => navigate('/projects')}>← Back</button>
+          <button style={s.back} onClick={() => navigate('/projects')}>Back</button>
           <div>
             <h1 style={s.title}>
               {project.name} — Backlog
@@ -333,7 +333,7 @@ function BacklogIssueRow({
           onClick={(e) => { e.stopPropagation(); onCopy(zohoUrl ?? `#${issue.itemNo}`, issue.itemNo); }}
           title={zohoUrl ? 'Copy Zoho URL' : 'Copy issue ID'}
         >
-          {copied === issue.itemNo ? '✓' : '⧉'}
+          {copied === issue.itemNo ? 'Copied' : 'Copy'}
         </button>
       </div>
 

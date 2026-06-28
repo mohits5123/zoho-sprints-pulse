@@ -75,7 +75,7 @@ export function EpicCard({ epic, staleDays, onStatusClick, onStaleClick, onUserC
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {/* Show a green "Done" badge when every ticket in the epic is completed. */}
           {allDone && (
-            <span style={s.doneBadge} title="All tickets done">✓ Done</span>
+            <span style={s.doneBadge} title="All tickets done">Done</span>
           )}
           {/* Show a yellow stale badge when there are aged issues (only if not all done). */}
           {!allDone && epic.staleCount > 0 && (
@@ -84,7 +84,7 @@ export function EpicCard({ epic, staleDays, onStatusClick, onStaleClick, onUserC
               onClick={onStaleClick}
               title={`${epic.staleCount} ticket${epic.staleCount !== 1 ? 's' : ''} created ${staleDays ?? 7}+ days ago`}
             >
-              ⚠ {epic.staleCount} stale
+              {epic.staleCount} stale
             </span>
           )}
         </div>

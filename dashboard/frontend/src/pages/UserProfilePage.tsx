@@ -224,7 +224,7 @@ function CollaborationScore({ total, collab }: { total: number; collab: number }
         <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#06b6d4', borderRadius: 4, transition: 'width 0.4s' }} />
       </div>
       <p style={{ margin: 0, fontSize: 12, color: '#475569' }}>
-        {pct >= 50 ? '✓ Highly collaborative' : pct >= 25 ? 'Moderate collaboration' : 'Mostly solo work'}
+        {pct >= 50 ? 'Highly collaborative' : pct >= 25 ? 'Moderate collaboration' : 'Mostly solo work'}
       </p>
     </div>
   );
@@ -396,7 +396,7 @@ export function UserProfilePage() {
   if (loading) return (
     <div style={s.page}>
       <header style={s.header}>
-        <button style={s.back} onClick={() => navigate('/users')}>← Back</button>
+        <button style={s.back} onClick={() => navigate('/users')}>Back</button>
       </header>
       <p style={s.muted}>Loading profile…</p>
     </div>
@@ -476,7 +476,7 @@ export function UserProfilePage() {
         {/* 2.8 Stale Tickets */}
         <Section title={`Stale Tickets (≥${staleDays} days)`} span={2}>
           {staleIssues.length === 0
-            ? <p style={{ margin: 0, fontSize: 13, color: '#22c55e' }}>✓ No stale tickets</p>
+            ? <p style={{ margin: 0, fontSize: 13, color: '#22c55e' }}>No stale tickets</p>
             : staleIssues.map((issue) => (
               <IssueRow
                 key={issue.zohoId}
@@ -492,12 +492,12 @@ export function UserProfilePage() {
         {/* 2.10 Overdue Tickets */}
         <Section title="Overdue Tickets" span={2}>
           {overdueIssues.length === 0
-            ? <p style={{ margin: 0, fontSize: 13, color: '#22c55e' }}>✓ No overdue tickets</p>
+            ? <p style={{ margin: 0, fontSize: 13, color: '#22c55e' }}>No overdue tickets</p>
             : overdueIssues.map((issue) => (
               <IssueRow
                 key={issue.zohoId}
                 issue={issue}
-                badge={`${issue.delayedDays}d late`}
+                badge={`${daysAgo(issue.createdAt)}d old`}
                 badgeColor="#ef4444"
                 onClick={() => goToIssues({ sprintId: issue.sprintId })}
               />
@@ -506,7 +506,7 @@ export function UserProfilePage() {
         </Section>
 
         {/* 2.2 + 2.3 Sprint History */}
-        <Section title={`Sprint History (last ${history.length} sprints)`} span={4}>
+        <Section title={`Sprint History (${history.length} sprint${history.length !== 1 ? 's' : ''})`} span={4}>
           {histLoading
             ? <p style={{ margin: 0, fontSize: 13, color: '#475569' }}>Loading history…</p>
             : <SprintHistorySection history={history} />
@@ -520,7 +520,7 @@ export function UserProfilePage() {
               <IssueRow
                 key={issue.zohoId}
                 issue={issue}
-                badge={issue.statusGroup === 'done' ? '✓' : issue.statusGroup}
+                badge={issue.statusGroup === 'done' ? 'done' : issue.statusGroup}
                 badgeColor={issue.statusGroup === 'done' ? '#22c55e' : issue.statusGroup === 'doing' ? '#3b82f6' : '#64748b'}
                 onClick={() => goToIssues({ creatorOnly: 'true', sprintId: issue.sprintId })}
               />
