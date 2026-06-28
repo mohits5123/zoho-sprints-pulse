@@ -21,9 +21,11 @@ import { useNavigate } from 'react-router-dom';
 import { fetchSprints, syncSprints, fetchSyncStatus, fetchPastSprintNames, fetchPastSprintData, fetchProjects, SprintSnapshot, Project, PastSprintName, updateSprintDisplay } from '../api/client';
 import { SprintCard } from '../components/SprintCard';
 import { LastSyncedFooter } from '../components/LastSyncedFooter';
+import { useSyncProgress } from '../contexts/SyncProgressContext';
 
 export function SprintHealth() {
   const navigate = useNavigate();
+  const { setSyncActive } = useSyncProgress();
   function onSprintClick(projectId: string, sprintZohoId: string) {
     navigate(`/board/${projectId}?sprintId=${sprintZohoId}`);
   }
@@ -139,6 +141,7 @@ export function SprintHealth() {
   async function handleSync() {
     setSyncing(true);
     setError(null);
+    setSyncActive(true);
     const prevSyncedAt = lastSyncedAt;
     try {
       await syncSprints();
@@ -152,12 +155,14 @@ export function SprintHealth() {
             setSprints(updated.sprints);
             setLastSyncedAt(ts);
             setSyncing(false);
+            setSyncActive(false);
           }
         } catch { /* keep polling */ }
       }, 5_000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed');
       setSyncing(false);
+      setSyncActive(false);
     }
   }
 

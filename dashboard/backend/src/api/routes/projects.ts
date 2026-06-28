@@ -12,9 +12,8 @@ import { Router } from 'express';
 import axios from 'axios';
 import prisma from '../../db/client';
 import { syncZohoProjects } from '../../services/zohoProjects';
-import { syncSprintHealth } from '../../services/zohoSprints';
+import { runFullSync } from '../../services/zohoSprints';
 import { queryIssues, querySprintEpics, queryKanbanBoardIssues, queryBacklogIssues, queryBacklogStats } from '../../services/issueQueries';
-import { touchLastSyncedAt } from '../../services/syncStatus';
 
 const router = Router();
 
@@ -95,49 +94,31 @@ router.get('/', async (_req, res) => {
  * @auth Required (OAuth token validation via syncZohoProjects())
  */
 router.post('/sync', async (_req, res) => {
-  try {
-    const projectCount = await syncZohoProjects();
-    if (projectCount === 0) {
-      res.status(502).json({ error: 'Zoho returned 0 projects. Check the backend console for the raw response.' });
-      return;
-    }
+  // Respond with current DB state immediately (avoids long-running HTTP request timeout)
+  const projects = await prisma.project.findMany({ orderBy: { displayOrder: 'asc' } });
+  const sprints  = await prisma.sprint.findMany({ where: { totalTickets: { not: 0 }, status: 'active' } });
 
-    const projects = await prisma.project.findMany({ orderBy: { displayOrder: 'asc' } });
-    const sprints  = await prisma.sprint.findMany({ where: { totalTickets: { not: 0 }, status: 'active' } });
-
-    const sprintsByProject: Record<string, typeof sprints> = {};
-    for (const sprint of sprints) {
-      if (!sprintsByProject[sprint.projectZohoId]) sprintsByProject[sprint.projectZohoId] = [];
-      sprintsByProject[sprint.projectZohoId].push(sprint);
-    }
-    const projectsWithSprints = projects.map((p) => ({ ...p, projNo: extractProjNo(p.rawData), activeSprints: sprintsByProject[p.zohoId] ?? [] }));
-
-    // Respond immediately with the freshly synced project list
-    res.json({ synced: projectCount, projects: projectsWithSprints });
-
-    // Then run the full sprint/issue sync in the background
-    setImmediate(async () => {
-      try {
-        await syncSprintHealth();
-        await touchLastSyncedAt();
-        console.log('✅ Background sprint sync complete');
-      } catch (err) {
-        const zohoBody = axios.isAxiosError(err) ? err.response?.data : undefined;
-        const message  = axios.isAxiosError(err)
-          ? `Zoho API ${err.response?.status ?? 'error'} at ${err.config?.url}: ${JSON.stringify(zohoBody ?? err.message)}`
-          : (err instanceof Error ? err.message : 'Unknown error');
-        console.error('❌ Background sprint sync failed:', message);
-      }
-    });
-  } catch (err) {
-    const zohoBody = axios.isAxiosError(err) ? err.response?.data : undefined;
-    const message  = axios.isAxiosError(err)
-      ? `Zoho API ${err.response?.status ?? 'error'} at ${err.config?.url}: ${JSON.stringify(zohoBody ?? err.message)}`
-      : (err instanceof Error ? err.message : 'Unknown error');
-
-    console.error('❌ Sync failed:', message);
-    res.status(500).json({ error: message });
+  const sprintsByProject: Record<string, typeof sprints> = {};
+  for (const sprint of sprints) {
+    if (!sprintsByProject[sprint.projectZohoId]) sprintsByProject[sprint.projectZohoId] = [];
+    sprintsByProject[sprint.projectZohoId].push(sprint);
   }
+  const projectsWithSprints = projects.map((p) => ({ ...p, projNo: extractProjNo(p.rawData), activeSprints: sprintsByProject[p.zohoId] ?? [] }));
+  res.json({ synced: 0, projects: projectsWithSprints });
+
+  // Run full sync (projects + sprints) in the background
+  setImmediate(async () => {
+    try {
+      await runFullSync();
+      console.log('✅ Background full sync complete');
+    } catch (err) {
+      const zohoBody = axios.isAxiosError(err) ? err.response?.data : undefined;
+      const message  = axios.isAxiosError(err)
+        ? `Zoho API ${err.response?.status ?? 'error'} at ${err.config?.url}: ${JSON.stringify(zohoBody ?? err.message)}`
+        : (err instanceof Error ? err.message : 'Unknown error');
+      console.error('❌ Full sync failed:', message);
+    }
+  });
 });
 
 const VALID_BOARD_TYPES = ['scrum', 'kanban', 'other'] as const;

@@ -3,21 +3,17 @@ import cors from 'cors';
 import cron from 'node-cron';
 import { config } from './config';
 import { initAuth } from './services/zohoAuth';
-import { syncZohoProjects } from './services/zohoProjects';
-import { syncAll } from './services/zohoSprints';
-import { touchLastSyncedAt } from './services/syncStatus';
+import { runFullSync } from './services/zohoSprints';
 import apiRouter from './api/router';
 
 /**
  * Executes a full data synchronization with Zoho Sprints.
  * Updates projects, sprints, issues, and updates the last sync timestamp.
  */
-async function runFullSync(): Promise<void> {
+async function executeFullSync(): Promise<void> {
   try {
     console.log('⏱  Full sync starting…');
-    await syncZohoProjects();
-    await syncAll();
-    await touchLastSyncedAt();
+    await runFullSync();
     console.log('✅ Full sync complete');
   } catch (err) {
     console.error('⚠️  Full sync failed:', err instanceof Error ? err.message : err);
@@ -51,7 +47,7 @@ async function bootstrap(): Promise<void> {
     // Rate limiter inside syncAll ensures ≤25 Zoho req/min, so no API lockouts
     cron.schedule('0 * * * *', () => {
       console.log('⏰ Scheduled sync triggered by cron');
-      runFullSync().catch(console.error);
+      executeFullSync().catch(console.error);
     });
   });
 }

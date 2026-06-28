@@ -21,6 +21,8 @@ import { BoardPage } from './pages/BoardPage';
 import { IssueListPage } from './pages/IssueListPage';
 import { UserProfilePage } from './pages/UserProfilePage';
 import { BacklogPage } from './pages/BacklogPage';
+import { SyncProgressBar } from './components/SyncProgressBar';
+import { SyncProgressProvider } from './contexts/SyncProgressContext';
 
 /**
  * Root application component that renders the navigation structure.
@@ -30,17 +32,20 @@ import { BacklogPage } from './pages/BacklogPage';
  */
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/users" element={<Users />} />
-        <Route path="/users/:userId" element={<UserProfilePage />} />
-        <Route path="/projects" element={<Projects />} />
-        <Route path="/sprints" element={<SprintHealth />} />
-        <Route path="/board/:projectId" element={<BoardPage />} />
-        <Route path="/board/:projectId/issues" element={<IssueListPage />} />
-        <Route path="/backlog/:projectId" element={<BacklogPage />} />
-      </Routes>
-    </BrowserRouter>
+    <SyncProgressProvider>
+      <BrowserRouter>
+        <SyncProgressBar />
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/users" element={<Users />} />
+          <Route path="/users/:userId" element={<UserProfilePage />} />
+          <Route path="/projects" element={<Projects />} />
+          <Route path="/sprints" element={<SprintHealth />} />
+          <Route path="/board/:projectId" element={<BoardPage />} />
+          <Route path="/board/:projectId/issues" element={<IssueListPage />} />
+          <Route path="/backlog/:projectId" element={<BacklogPage />} />
+        </Routes>
+      </BrowserRouter>
+    </SyncProgressProvider>
   );
 }

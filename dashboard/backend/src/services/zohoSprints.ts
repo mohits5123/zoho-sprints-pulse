@@ -56,6 +56,8 @@ import { config } from '../config';
 import prisma from '../db/client';
 import { recordBurndownSnapshot } from './burndownSnapshots';
 import { zohoThrottle } from './rateLimiter';
+import { startSync, completeSync, touchLastSyncedAt } from './syncStatus';
+
 
 const SETTINGS_KEY_TEAM_ID = 'zoho_team_id';
 
@@ -1487,3 +1489,16 @@ export async function syncAll(): Promise<number> {
 
 // Keep old export for backwards compatibility
 export const syncSprintHealth = syncAll;
+
+/**
+ * Full sync: projects + sprints, wrapped with startSync/completeSync
+ * so the progress bar has correct totalRequests and the in-progress
+ * flag is set/cleared properly.
+ */
+export async function runFullSync(): Promise<number> {
+  await startSync();
+  const synced = await syncAll();
+  await touchLastSyncedAt();
+  await completeSync(zohoThrottle.sent);
+  return synced;
+}

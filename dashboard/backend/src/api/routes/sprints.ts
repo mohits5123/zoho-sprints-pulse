@@ -9,11 +9,9 @@
 import { Router } from 'express';
 import axios from 'axios';
 import prisma from '../../db/client';
-import { syncSprintHealth, fetchPastSprintNames, fetchPastSprintData, resolveTeamId } from '../../services/zohoSprints';
-import { syncZohoProjects } from '../../services/zohoProjects';
+import { runFullSync, fetchPastSprintNames, fetchPastSprintData, resolveTeamId } from '../../services/zohoSprints';
 import { getAccessToken } from '../../services/zohoAuth';
 import { config } from '../../config';
-import { touchLastSyncedAt } from '../../services/syncStatus';
 
 const router = Router();
 
@@ -243,19 +241,17 @@ router.post('/sync', async (_req, res) => {
   const sprints = await prisma.sprint.findMany({ orderBy: { projectName: 'asc' } });
   res.json({ synced: 0, sprints, status: 'started' });
 
-  // Run full sync in background — rate limiter may take several minutes
+  // Run full sync (projects + sprints) in background — rate limiter may take several minutes
   setImmediate(async () => {
     try {
-      await syncZohoProjects();   // Sync project list first (sprints reference projects)
-      await syncSprintHealth();    // Then sync all sprint data
-      await touchLastSyncedAt();   // Update last sync timestamp in settings
-      console.log('✅ Background sprint sync complete');
+      await runFullSync();
+      console.log('✅ Background full sync complete');
     } catch (err) {
       const zohoBody = axios.isAxiosError(err) ? err.response?.data : undefined;
       const message  = axios.isAxiosError(err)
         ? `Zoho API ${err.response?.status ?? 'error'} at ${err.config?.url}: ${JSON.stringify(zohoBody ?? err.message)}`
         : (err instanceof Error ? err.message : 'Unknown error');
-      console.error('❌ Sprint sync failed:', message);
+      console.error('❌ Full sync failed:', message);
     }
   });
 });

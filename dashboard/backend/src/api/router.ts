@@ -50,9 +50,9 @@ router.use('/sprints', sprintsRouter);
 router.use('/config', appConfigRouter);
 
 /**
- * Mount sync status endpoint at /api/sync/status - returns last successful sync timestamp
+ * Mount sync status endpoint at /api/sync - returns last successful sync timestamp and progress
  */
-router.use('/sync/status', syncStatusRouter);
+router.use('/sync', syncStatusRouter);
 
 /**
  * Mount burndown endpoint at /api/sprints/:sprintZohoId/burndown - fetch or seed burndown data

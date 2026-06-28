@@ -555,7 +555,33 @@ export async function fetchAppConfig(): Promise<{ workspaceName: string }> {
  * Used by the UI to show sync status and elapsed time since last sync.
  */
 export async function fetchSyncStatus(): Promise<{ lastSyncedAt: string | null }> {
-  const res = await apiClient.get<{ lastSyncedAt: string | null }>('/sync/status');
+  const res = await apiClient.get<{ lastSyncedAt: string | null }>('/sync');
+  return res.data;
+}
+
+/**
+ * Sync progress state returned from the backend.
+ */
+export interface SyncProgress {
+  inProgress: boolean;
+  percentage: number | null;
+  requestsMade: number;
+  totalRequests: number;
+  isFirstSync: boolean;
+}
+
+/**
+ * Fetch real-time sync progress.
+ *
+ * @returns Current sync progress including percentage, request counts, and first-sync flag.
+ *
+ * @remarks
+ * This endpoint reads in-memory request counts from the rate limiter and total
+ * request counts from the database to calculate progress percentage.
+ * Polls every 2 seconds during active sync.
+ */
+export async function fetchSyncProgress(): Promise<SyncProgress> {
+  const res = await apiClient.get<SyncProgress>('/sync/progress');
   return res.data;
 }
 

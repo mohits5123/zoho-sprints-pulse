@@ -7,7 +7,7 @@
  */
 
 import { Router } from 'express';
-import { getLastSyncedAt } from '../../services/syncStatus';
+import { getLastSyncedAt, getSyncProgress } from '../../services/syncStatus';
 
 const router = Router();
 
@@ -29,6 +29,27 @@ router.get('/', async (_req, res) => {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('❌ Sync status read failed:', msg);
     res.status(500).json({ error: 'Failed to read sync status' });
+  }
+});
+
+/**
+ * GET /api/sync/progress — Returns real-time sync progress.
+ * @route GET /api/sync/progress
+ * @method GET
+ * @headers Content-Type: application/json
+ * @returns {Object} - { inProgress, percentage, requestsMade, totalRequests, isFirstSync }
+ * @example
+ * // Get current sync progress
+ * GET /api/sync/progress
+ */
+router.get('/progress', async (_req, res) => {
+  try {
+    const progress = await getSyncProgress();
+    res.json(progress);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('❌ Sync progress read failed:', msg);
+    res.status(500).json({ error: 'Failed to read sync progress' });
   }
 });
 

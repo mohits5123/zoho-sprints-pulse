@@ -25,9 +25,11 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchStatus, fetchUsers, syncUsers, fetchProjects, syncProjects, fetchSprints, syncSprints, StatusResponse } from '../api/client';
 import { StatusBadge } from '../components/StatusBadge';
+import { useSyncProgress } from '../contexts/SyncProgressContext';
 
 export function Home() {
   const navigate = useNavigate();
+  const { setSyncActive } = useSyncProgress();
 
   const [status, setStatus]               = useState<StatusResponse | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
@@ -59,6 +61,7 @@ export function Home() {
     e.stopPropagation();
     setSyncingUsers(true);
     setUserSyncError(null);
+    setSyncActive(true);
     try {
       const result = await syncUsers();
       setUserCount(result.synced);
@@ -66,6 +69,9 @@ export function Home() {
       setUserSyncError(err instanceof Error ? err.message : 'Sync failed');
     } finally {
       setSyncingUsers(false);
+      // Users sync is synchronous on the backend (no startSync/completeSync),
+      // so deactivate immediately after the response.
+      setSyncActive(false);
     }
   }
 
@@ -73,13 +79,19 @@ export function Home() {
     e.stopPropagation();
     setSyncingProjects(true);
     setProjectSyncError(null);
+    setSyncActive(true);
     try {
-      const result = await syncProjects();
-      setProjectCount(result.synced);
+      await syncProjects();
+      // The response returns { synced: 0 } immediately before the background
+      // sync runs. Don't overwrite projectCount — keep existing value.
     } catch (err) {
       setProjectSyncError(err instanceof Error ? err.message : 'Sync failed');
     } finally {
       setSyncingProjects(false);
+      // Projects sync runs in background via setImmediate → runFullSync → startSync.
+      // The 10s safety timeout in SyncProgressBar will stop polling if startSync
+      // never fires. Otherwise the background sync completion will be detected
+      // when setSyncActive(false) is called by the page that owns the sync.
     }
   }
 
@@ -87,13 +99,18 @@ export function Home() {
     e.stopPropagation();
     setSyncingSprints(true);
     setSprintSyncError(null);
+    setSyncActive(true);
     try {
       await syncSprints(); // fires sync in background, returns immediately
-      setSprintCount(null); // will update when cron/poll refreshes
+      // Don't clear sprintCount — keep existing value until the background
+      // sync completes and the page re-fetches.
     } catch (err) {
       setSprintSyncError(err instanceof Error ? err.message : 'Sync failed');
     } finally {
       setSyncingSprints(false);
+      // Sprints sync runs in background via setImmediate → runFullSync → startSync.
+      // The 10s safety timeout in SyncProgressBar will stop polling if startSync
+      // never fires.
     }
   }
 
