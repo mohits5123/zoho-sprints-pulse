@@ -181,24 +181,20 @@ export function StaleManagerModal({ projectId, statusGroups, config, onSave, onC
   }
 
   return (
-    // Clicking the overlay (but not the modal itself) closes the modal.
     <div style={s.overlay} onClick={onClose}>
-      // Prevent the click from bubbling to the overlay when clicking inside the modal.
       <div style={s.modal} onClick={e => e.stopPropagation()}>
 
         {/* Header */}
         <div style={s.header}>
-          <span style={s.title}>⏱ Stale Ticket Settings</span>
-          <button style={s.closeBtn} onClick={onClose}>✕</button>
+          <span style={s.title}>Stale Ticket Settings</span>
+          <button style={s.closeBtn} onClick={onClose}>x</button>
         </div>
 
         {/* Days */}
         <div style={s.section}>
           <label style={s.sectionLabel}>Mark ticket as stale after</label>
           <div style={s.daysRow}>
-             // Number input constrained to 1–365; out-of-range values are
-              // normalised on save via handleSave (clamped to minimum of 1).
-              <input
+            <input
                 type="number"
                 min={1}
                 max={365}
@@ -221,50 +217,30 @@ export function StaleManagerModal({ projectId, statusGroups, config, onSave, onC
           </div>
 
           <div style={s.statesList}>
-            {GROUP_ORDER.filter(g => grouped[g]?.length).map(group => {
-              const isDoneGroup = group === 'done';
-              return (
-                <div key={group} style={s.groupBlock}>
-                  <div style={s.groupHeader}>
-                    <span style={{ ...s.groupDot, backgroundColor: GROUP_COLOR[group] }} />
-                    <span style={s.groupLabel}>{GROUP_LABEL[group]}</span>
-                    {!isDoneGroup && (
-                      <div style={s.groupBulk}>
-                        // Bulk-select all statuses within this group.
-                        <button style={s.tinyBtn} onClick={() => selectAll(group)}>all</button>
-                        // Bulk-deselect every status within this group.
-                        <button style={s.tinyBtn} onClick={() => clearAll(group)}>none</button>
-                      </div>
-                    )}
-                    {isDoneGroup && (
-                      <span style={s.doneNote}>Always excluded</span>
-                    )}
+            {GROUP_ORDER.filter(g => grouped[g]?.length).map(group => (
+              <div key={group} style={s.groupBlock}>
+                <div style={s.groupHeader}>
+                  <span style={{ ...s.groupDot, backgroundColor: GROUP_COLOR[group] }} />
+                  <span style={s.groupLabel}>{GROUP_LABEL[group]}</span>
+                  <div style={s.groupBulk}>
+                    <button style={s.tinyBtn} onClick={() => selectAll(group)}>all</button>
+                    <button style={s.tinyBtn} onClick={() => clearAll(group)}>none</button>
                   </div>
-                  {grouped[group].map(name => (
-                    <label
-                      key={name}
-                      style={{
-                        ...s.stateRow,
-                        opacity: isDoneGroup ? 0.4 : 1,
-                        cursor:  isDoneGroup ? 'not-allowed' : 'pointer',
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={watched.has(name)}
-                        // Done-group statuses are permanently disabled — done tickets
-                        // are never considered stale, so they cannot be monitored.
-                        disabled={isDoneGroup}
-                        onChange={() => !isDoneGroup && toggleState(name)}
-                        style={s.checkbox}
-                      />
-                      <span style={{ ...s.stateDot, backgroundColor: GROUP_COLOR[group] }} />
-                      <span style={s.stateName}>{name}</span>
-                    </label>
-                  ))}
                 </div>
-              );
-            })}
+                {grouped[group].map(name => (
+                  <label key={name} style={{ ...s.stateRow, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={watched.has(name)}
+                      onChange={() => toggleState(name)}
+                      style={s.checkbox}
+                    />
+                    <span style={{ ...s.stateDot, backgroundColor: GROUP_COLOR[group] }} />
+                    <span style={s.stateName}>{name}</span>
+                  </label>
+                ))}
+              </div>
+            ))}
           </div>
         </div>
 
@@ -332,7 +308,7 @@ const s: Record<string, React.CSSProperties> = {
   },
   /** Modal title text — bold, light colour for high contrast on dark background. */
   title: { fontSize: 15, fontWeight: 700, color: '#f1f5f9' },
-  /** Close button (✕) — minimal styling, inherits pointer cursor. */
+  /** Close button (x) — minimal styling, inherits pointer cursor. */
   closeBtn: {
     background: 'none', border: 'none', cursor: 'pointer',
     color: '#64748b', fontSize: 16, padding: '0 2px',
