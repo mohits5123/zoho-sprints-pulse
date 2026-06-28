@@ -184,14 +184,14 @@ export function BoardPage() {
       setKanbanStaleCount(null);
       return;
     }
-    console.log('🔍 Fetching kanban stale count for project:', projectId, 'with staleDays:', staleDays, 'watchedStates:', watchedStates);
+    console.log('Fetching kanban stale count for project:', projectId, 'with staleDays:', staleDays, 'watchedStates:', watchedStates);
     fetchKanbanStaleCount(projectId, { staleDays: staleDays, watchedStates })
       .then(({ staleCount }) => {
-        console.log('✅ Kanban stale count:', staleCount);
+        console.log('Kanban stale count:', staleCount);
         setKanbanStaleCount(staleCount);
       })
       .catch((err) => {
-        console.error('❌ Failed to fetch kanban stale count:', err);
+        console.error('Failed to fetch kanban stale count:', err);
       });
   }, [projectId, project?.boardType, staleDays, watchedStates.join(',')]);
 
@@ -232,7 +232,7 @@ export function BoardPage() {
       <header style={s.header}>
         <div style={s.headerLeft}>
           {/* Back button: navigate to /sprints if we arrived via a sprint link, otherwise /projects */}
-          <button style={s.back} onClick={() => navigate(searchParams.has('sprintId') ? '/sprints' : '/projects')}>← Back</button>
+          <button style={s.back} onClick={() => navigate(searchParams.has('sprintId') ? '/sprints' : '/projects')}>Back</button>
           <div>
             <h1 style={s.title}>{project?.name ?? '…'}</h1>
             <p style={s.subtitle}>
@@ -251,11 +251,11 @@ export function BoardPage() {
           {/* Stale settings button — opens the StaleManagerModal for configuring
               how many days and which statuses count as "stale". */}
            <button style={s.staleBtn} onClick={() => setShowStaleModal(true)} title="Configure stale ticket settings">
-             ⏱ Stale: {staleDays}d
+             Stale: {staleDays}d
              {watchedStates.length > 0 && (
                <span style={s.staleBtnBadge}> · {watchedStates.length} state{watchedStates.length !== 1 ? 's' : ''}</span>
              )}
-             <span style={s.staleBtnIcon}>⚙</span>
+             <span style={s.staleBtnIcon}>Settings</span>
            </button>
 
 
@@ -263,7 +263,7 @@ export function BoardPage() {
                with multiple active sprints and a sprint already selected */}
            {selectedSprint && project?.boardType !== 'kanban' && project?.activeSprints && project.activeSprints.length > 1 && (
              <button style={s.switchBtn} onClick={() => { setSelectedSprint(null); setEpics([]); }}>
-               ← Switch sprint
+               Switch sprint
              </button>
            )}
          </div>
@@ -358,10 +358,10 @@ export function BoardPage() {
                      }}
                  />
 
-                {/* Sprint progress card — shows epic-level progress within the sprint.
-                    Skipped during epic fetch; for kanban it uses the project's raw
-                    statusBreakdown instead. */}
-                {!epicsLoading && (epics.length > 0 || project?.boardType === 'kanban') && (
+                {/* Sprint progress card — always uses the raw sprint/project statusBreakdown
+                    (same source as SprintCard) so it reflects all tickets regardless of
+                    which states are selected in the stale menu. */}
+                {!epicsLoading && (
                     <SprintProgressCard
                       epics={epics}
                       statusGroups={sprintStatusGroups}
@@ -373,7 +373,7 @@ export function BoardPage() {
                     navigate(`/board/${projectId}/issues?${params}`);
                   }}
                   isKanban={project?.boardType === 'kanban'}
-                  statusBreakdown={project?.boardType === 'kanban' ? project.statusBreakdown : null}
+                  statusBreakdown={project?.boardType === 'kanban' ? project.statusBreakdown : selectedSprint.statusBreakdown}
                 />
                 )}
 
