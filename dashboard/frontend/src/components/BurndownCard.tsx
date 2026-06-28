@@ -250,7 +250,13 @@ export function BurndownCard({ sprint, doneCount, totalCount }: BurndownCardProp
 
   // Coordinate scaling: maps dates → X pixels and remaining counts → Y pixels.
   const totalMs = axisEnd.getTime() - start.getTime();
-  
+
+  // Dynamic Y-axis max: the highest "remaining" value seen in the timeline (can exceed
+  // the original totalCount when issues are added to the sprint after it starts).
+  // Adding a 10% top-padding margin keeps the peak point inside the chart bounds.
+  const peakRemaining = timeline.reduce((m, p) => Math.max(m, p.remaining), totalCount);
+  const yMax = Math.ceil(peakRemaining * 1.1) || totalCount;
+
   /**
    * Converts a date to its X pixel position within the chart area.
    * Clamps the result to [PAD.left, PAD.left + IW] to handle out-of-range dates.
@@ -263,9 +269,10 @@ export function BurndownCard({ sprint, doneCount, totalCount }: BurndownCardProp
 
   /**
    * Converts a remaining task count to its Y pixel position.
-   * Inverted axis: 0 remaining → bottom of chart, totalCount → top of chart.
+   * Inverted axis: 0 remaining → bottom of chart, yMax → top of chart.
+   * Uses dynamic yMax so the chart stays within bounds even when issues are added mid-sprint.
    */
-  const yOf = (remaining: number) => PAD.top + (1 - remaining / totalCount) * IH;
+  const yOf = (remaining: number) => PAD.top + (1 - remaining / yMax) * IH;
 
   // Calculate overdue zone geometry
   const endX   = xOf(end);
@@ -309,8 +316,8 @@ export function BurndownCard({ sprint, doneCount, totalCount }: BurndownCardProp
       return `${i === 0 ? 'M' : 'L'} ${px} ${py}`;
     }).join(' ');
 
- // Y-axis grid lines at 0%, 25%, 50%, 75%, 100% of total tasks
-  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * totalCount));
+ // Y-axis grid lines at 0%, 25%, 50%, 75%, 100% of yMax (dynamic scale)
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * yMax));
 
   // X-axis tick labels: start, midpoint, due date (always), and "Today" (conditionally)
   const plannedMid = new Date(start.getTime() + (end.getTime() - start.getTime()) / 2);
@@ -333,7 +340,7 @@ export function BurndownCard({ sprint, doneCount, totalCount }: BurndownCardProp
   // Status pill: color-coded based on sprint state — red (overdue), green (completed), amber (active)
   const pillColor = isOverdue ? '#ef4444' : isCompleted ? '#22c55e' : '#f59e0b';
   const daysLabel = isCompleted
-    ? '✓ Completed'
+    ? 'Completed'
     : isOverdue
     ? `${overdueBy}d overdue`
     : daysLeft === 0 ? 'Last day' : `${daysLeft}d left`;
