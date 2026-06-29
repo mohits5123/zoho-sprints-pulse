@@ -23,6 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import { fetchSprints, syncSprints, fetchSyncStatus, fetchPastSprintNames, fetchPastSprintData, fetchProjects, SprintSnapshot, Project, PastSprintName, updateSprintDisplay } from '../api/client';
 import { SprintCard } from '../components/SprintCard';
 import { LastSyncedFooter } from '../components/LastSyncedFooter';
+import { SyncButton } from '../components/SyncButton';
 import { useSyncProgress } from '../contexts/SyncProgressContext';
 
 /**
@@ -47,13 +48,12 @@ import { useSyncProgress } from '../contexts/SyncProgressContext';
  */
 export function SprintHealth() {
   const navigate = useNavigate();
-  const { setSyncActive } = useSyncProgress();
+  const { syncActive, setSyncActive } = useSyncProgress();
   function onSprintClick(projectId: string, sprintZohoId: string) {
     navigate(`/board/${projectId}?sprintId=${sprintZohoId}`);
   }
   const [sprints, setSprints]   = useState<SprintSnapshot[]>([]);
   const [loading, setLoading]   = useState(true);
-  const [syncing, setSyncing]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -229,7 +229,6 @@ export function SprintHealth() {
    *                      is not an `Error` instance
    */
   async function handleSync() {
-    setSyncing(true);
     setError(null);
     setSyncActive(true);
     const prevSyncedAt = lastSyncedAt;
@@ -244,14 +243,12 @@ export function SprintHealth() {
             const updated = await fetchSprints();
             setSprints(updated.sprints);
             setLastSyncedAt(ts);
-            setSyncing(false);
             setSyncActive(false);
           }
         } catch { /* keep polling */ }
       }, 5_000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed');
-      setSyncing(false);
       setSyncActive(false);
     }
   }
@@ -279,25 +276,21 @@ export function SprintHealth() {
           </div>
         </div>
         <div style={s.headerActions}>
-          <button style={s.pastBtn} onClick={handleLoadPast} disabled={loading || syncing}>
+          <button style={s.pastBtn} onClick={handleLoadPast} disabled={loading || syncActive}>
             Load Past Sprints
           </button>
-          <button style={s.syncBtn} onClick={handleSync} disabled={syncing}>
-            {syncing ? 'Syncing… (background)' : 'Sync'}
-          </button>
+          <SyncButton onClick={handleSync} />
         </div>
       </header>
 
       {error && <p style={s.errorText}>{error}</p>}
       {loading && <p style={s.muted}>Loading sprint data…</p>}
 
-      {!loading && sprints.length === 0 && !syncing && (
+      {!loading && sprints.length === 0 && !syncActive && (
         <div style={s.empty}>
           <p style={s.emptyTitle}>No sprint data yet</p>
           <p style={s.muted}>Make sure your Zoho credentials are set in ~/.zshrc, then click <strong>Sync</strong>.</p>
-          <button style={s.syncBtnLarge} onClick={handleSync} disabled={syncing}>
-            {syncing ? 'Syncing…' : 'Sync'}
-          </button>
+          <SyncButton onClick={handleSync} label="Sync" style={{ marginTop: 8, padding: '12px 32px', fontSize: 15, fontWeight: 600 }} />
         </div>
       )}
 
@@ -504,10 +497,6 @@ const s: Record<string, React.CSSProperties> = {
   },
   title:    { margin: 0, fontSize: 28, fontWeight: 700, color: '#f1f5f9' },
   subtitle: { margin: '4px 0 0', fontSize: 14, color: '#64748b' },
-  syncBtn: {
-    padding: '8px 20px', backgroundColor: '#3b82f6', color: '#fff',
-    border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
-  },
   pastBtn: {
     padding: '8px 20px', backgroundColor: '#1e293b', color: '#94a3b8',
     border: '1px solid #334155', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
@@ -522,11 +511,6 @@ const s: Record<string, React.CSSProperties> = {
     display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center',
   },
   emptyTitle: { fontSize: 18, fontWeight: 600, color: '#e2e8f0', margin: 0 },
-  syncBtnLarge: {
-    marginTop: 8, padding: '12px 32px', backgroundColor: '#3b82f6',
-    color: '#fff', border: 'none', borderRadius: 8,
-    fontSize: 15, fontWeight: 600, cursor: 'pointer',
-  },
   muted: { color: '#64748b', fontSize: 14, margin: 0 },
   errorText: { color: '#fca5a5', fontSize: 14, marginBottom: 16 },
   sectionHeader: { fontSize: 18, fontWeight: 600, color: '#94a3b8', marginTop: 32, marginBottom: 16 },

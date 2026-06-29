@@ -50,11 +50,13 @@ export function SyncProgressBar() {
     totalRequests: 0,
   });
 
-  // Tracks whether we've ever seen `inProgress: true` from the API. This is
-  // used by the 10-second safety timeout to detect "orphaned" syncs — syncs
-  // initiated by the UI but never acknowledged by the backend (e.g. users
-  // sync or projects sync that don't call `startSync` on the backend).
+  // Tracks whether we've ever seen `inProgress: true` from the API. Used by
+  // the 10-second safety timeout to detect "orphaned" syncs that never call
+  // `startSync` on the backend (e.g. users sync).
   const hasSeenInProgress = useRef(false);
+  // Tracks whether the last observed state was in-progress so we can detect
+  // the transition to false and deactivate the global sync flag.
+  const wasInProgress = useRef(false);
 
   const poll = useCallback(async () => {
     try {
@@ -72,11 +74,17 @@ export function SyncProgressBar() {
 
       if (data.inProgress) {
         hasSeenInProgress.current = true;
+        wasInProgress.current = true;
+      } else if (wasInProgress.current) {
+        // Transitioned from in-progress → done: deactivate the global sync flag
+        // so all SyncButtons are re-enabled automatically.
+        wasInProgress.current = false;
+        setSyncActive(false);
       }
     } catch (err) {
       console.error('[SyncProgressBar] Polling error:', err);
     }
-  }, []);
+  }, [setSyncActive]);
 
   // Start polling when syncActive becomes true; stop when it becomes false.
   // Also add a 10s safety timeout: if syncActive is true but the API never
@@ -88,6 +96,7 @@ export function SyncProgressBar() {
     }
 
     hasSeenInProgress.current = false;
+    wasInProgress.current = false;
 
     const timeout = setTimeout(() => {
       if (!hasSeenInProgress.current) {

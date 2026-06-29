@@ -31,6 +31,8 @@ import {
   updateProjectDisplay, reorderProjects, fetchSyncStatus, Project,
 } from '../api/client';
 import { LastSyncedFooter } from '../components/LastSyncedFooter';
+import { SyncButton } from '../components/SyncButton';
+import { useSyncProgress } from '../contexts/SyncProgressContext';
 
 /**
  * Valid board types for projects.
@@ -377,9 +379,9 @@ function ProjectCard({
  */
 export function Projects() {
   const navigate = useNavigate();
+  const { setSyncActive } = useSyncProgress();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading]   = useState(true);
-  const [syncing, setSyncing]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
   const [hiddenOpen, setHiddenOpen] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
@@ -401,17 +403,18 @@ export function Projects() {
    * and the last-sync timestamp. Resets any previous errors.
    */
   async function handleResync() {
-    setSyncing(true);
     setError(null);
+    setSyncActive(true);
     try {
       const result = await syncProjects();
       setProjects([...result.projects].sort((a, b) => a.displayOrder - b.displayOrder));
       fetchSyncStatus().then(({ lastSyncedAt: ts }) => setLastSyncedAt(ts)).catch(() => {});
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed');
-    } finally {
-      setSyncing(false);
+      setSyncActive(false); // on error deactivate immediately; no background sync to complete
     }
+    // On success: setSyncActive(false) is called by SyncProgressBar when the
+    // background sync reports inProgress=false.
   }
 
   /**
@@ -512,9 +515,7 @@ export function Projects() {
             <p style={s.subtitle}>{projects.length} projects synced from Zoho Sprints</p>
           </div>
         </div>
-        <button style={s.resyncBtn} onClick={handleResync} disabled={syncing}>
-          {syncing ? 'Syncing…' : 'Sync'}
-        </button>
+        <SyncButton onClick={handleResync} />
       </header>
 
       {error && <p style={s.errorText}>{error}</p>}
@@ -609,11 +610,6 @@ const s: Record<string, React.CSSProperties> = {
   },
   title:    { margin: 0, fontSize: 28, fontWeight: 700, color: '#f1f5f9' },
   subtitle: { margin: '4px 0 0', fontSize: 14, color: '#64748b' },
-  resyncBtn: {
-    padding: '8px 20px', backgroundColor: 'transparent',
-    color: '#94a3b8', border: '1px solid #334155',
-    borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: 'pointer',
-  },
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
