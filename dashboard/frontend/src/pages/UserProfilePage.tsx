@@ -10,7 +10,7 @@
  * - Stale tickets list (issues over staleDays threshold)
  * - Overdue tickets list (issues past target date, not done)
  * - Sprint history (last N sprints with assigned/done/completion metrics)
- * - Tickets raised this sprint (with status badges)
+ * - Tickets raised last 30 days (with status badges)
  *
  * Features:
  * - Click on any issue to navigate to filtered issue list
@@ -515,7 +515,7 @@ export function UserProfilePage() {
 
         {/* Raised tickets list */}
         {raisedIssues.length > 0 && (
-          <Section title={`Tickets Raised This Sprint (${raisedIssues.length})`} span={4}>
+          <Section title={`Tickets Raised – Last 30 Days (${raisedIssues.length})`} span={4}>
             {raisedIssues.map((issue) => (
               <IssueRow
                 key={issue.zohoId}

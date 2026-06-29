@@ -9,7 +9,7 @@ import { Router } from 'express';
 import axios from 'axios';
 import prisma from '../../db/client';
 import { fetchZohoUsers } from '../../services/zohoUsers';
-import { queryUserIssues, queryUserSprintHistory } from '../../services/issueQueries';
+import { queryUserIssues, queryUserSprintHistory, type ContextualIssue } from '../../services/issueQueries';
 
 // All route handlers below are mounted under the Express router and protected by the
 // application-level OAuth middleware (applied when this router is registered in the app).
@@ -51,14 +51,15 @@ router.get('/', async (_req, res) => {
  *   {
  *     user: { zohoId, name, email, role },
  *     issues: Array<Issue> - All issues created by this user (across all active sprints)
- *     raisedIssues: Issue[] - Filtered issues where this user is the creator
+ *     raisedIssues: Issue[] - Issues created by this user in the last 30 days (across all sprints)
  *     summary: { total, todo, doing, done, stale, overdue, collab, raised } - Aggregate counts
  *     sprintCount: number - Total active sprints in system
  *     staleDays: number - Used staleness threshold for this query
  *   }
  * @notes
  *   - Single DB query, no Zoho calls per request (uses cached SQLite data)
- *   - Issues are filtered to only active sprints via queryUserIssues()
+ *   - issues are filtered to only active sprints via queryUserIssues()
+ *   - raisedIssues are filtered by createdAt >= 30 days ago across all sprints
  *   - Creators != assignees; creator is who raised the ticket, not necessarily who's working on it
  * @auth Required (OAuth token validation)
  */
@@ -77,7 +78,77 @@ router.get('/:id/profile', async (req, res) => {
 
     // Single DB query — no Zoho calls
     const allIssues = await queryUserIssues(user.zohoId, staleDays, watchedStates);
-    const raisedIssues = allIssues.filter(i => i.creator?.id === user.zohoId);
+
+    // Raised issues: tickets created by this user in the last 30 days, across all sprints.
+    // This is a separate query from allIssues (which is scoped to active sprints).
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    type RawRaisedRow = {
+      zohoId: string; sprintZohoId: string; projectZohoId: string;
+      itemNo: string; title: string; status: string; statusGroup: string;
+      epicZohoId: string | null; creatorZohoId: string | null;
+      assigneeIds: string; createdAt: string | null; endDate: string | null;
+    };
+    const rawRaised = await prisma.$queryRawUnsafe<RawRaisedRow[]>(
+      `SELECT i.* FROM "Issue" i
+       WHERE i.creatorZohoId = ?
+         AND i.createdAt >= ?`,
+      user.zohoId,
+      thirtyDaysAgo,
+    );
+
+    // Build sprint/project lookup maps for context enrichment
+    const allSprintZohoIds  = [...new Set(rawRaised.map(r => r.sprintZohoId))];
+    const allProjectZohoIds = [...new Set(rawRaised.map(r => r.projectZohoId))];
+    const [sprintRows, projectRows] = await Promise.all([
+      allSprintZohoIds.length  > 0 ? prisma.sprint.findMany({ where: { zohoId: { in: allSprintZohoIds  } } }) : [],
+      allProjectZohoIds.length > 0 ? prisma.project.findMany({ where: { zohoId: { in: allProjectZohoIds } } }) : [],
+    ]);
+    const sprintByZohoId  = new Map(sprintRows.map(s  => [s.zohoId,  s]));
+    const projectByZohoId = new Map(projectRows.map(p => [p.zohoId, p]));
+
+    // Build userMap for name resolution (reused from allIssues path via prisma)
+    const userRows = await prisma.user.findMany();
+    const userMap  = new Map(userRows.map(u => [u.zohoId, { id: u.zohoId, name: u.name, role: u.role }]));
+
+    const raisedIssues: ContextualIssue[] = rawRaised.map(row => {
+      let parsedAssigneeIds: string[] = [];
+      try { parsedAssigneeIds = JSON.parse(row.assigneeIds) as string[]; } catch { /* empty */ }
+
+      const creator = row.creatorZohoId
+        ? (userMap.get(row.creatorZohoId) ?? { id: row.creatorZohoId, name: 'Unknown', role: 'OTHER' })
+        : null;
+      const assignees = parsedAssigneeIds.map(id => userMap.get(id) ?? { id, name: 'Unknown', role: 'OTHER' });
+
+      const sprint  = sprintByZohoId.get(row.sprintZohoId);
+      const project = projectByZohoId.get(row.projectZohoId);
+
+      const nowMs = Date.now();
+      const createdMs = row.createdAt ? new Date(row.createdAt).getTime() : nowMs;
+      const daysSinceUpdate = Math.floor((nowMs - createdMs) / 86_400_000);
+      const isStale = row.statusGroup !== 'done' && daysSinceUpdate >= staleDays;
+      const delayedDays = (row.endDate && row.statusGroup !== 'done')
+        ? Math.max(0, Math.floor((nowMs - new Date(row.endDate).getTime()) / 86_400_000))
+        : 0;
+
+      return {
+        zohoId:      row.zohoId,
+        itemNo:      row.itemNo,
+        title:       row.title,
+        status:      row.status,
+        statusGroup: row.statusGroup,
+        epicId:      row.epicZohoId ?? null,
+        creator,
+        assignees,
+        createdAt:   row.createdAt   ?? null,
+        endDate:     row.endDate     ?? null,
+        delayedDays,
+        isStale,
+        sprintId:    sprint?.zohoId    ?? row.sprintZohoId,
+        sprintName:  sprint?.name      ?? row.sprintZohoId,
+        projectId:   project?.zohoId   ?? row.projectZohoId,
+        projectName: project?.name     ?? row.projectZohoId,
+      };
+    });
 
     const todo    = allIssues.filter((i) => i.statusGroup === 'todo').length;
     const doing   = allIssues.filter((i) => i.statusGroup === 'doing').length;
