@@ -214,10 +214,10 @@ export function TicketRaiserCard({ projectId, sprintId, boardType, onUserClick }
           <span style={{ textAlign: 'right' as const }}>#</span>
           <span />
           <span>Raiser</span>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <span style={{ width: 18, textAlign: 'center' as const }}>[ ]</span>
-            <span style={{ width: 18, textAlign: 'center' as const }}>>  </span>
-            <span style={{ width: 18, textAlign: 'center' as const }}>ok</span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span title="Todo"        style={{ width: 18, display: 'flex', justifyContent: 'center' }}><span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: '#64748b', display: 'inline-block' }} /></span>
+            <span title="In Progress" style={{ width: 18, display: 'flex', justifyContent: 'center' }}><span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: '#3b82f6', display: 'inline-block' }} /></span>
+            <span title="Done"        style={{ width: 18, display: 'flex', justifyContent: 'center' }}><span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: '#22c55e', display: 'inline-block' }} /></span>
             <span style={{ width: 22, textAlign: 'right' as const }}>Tot</span>
           </div>
         </div>
