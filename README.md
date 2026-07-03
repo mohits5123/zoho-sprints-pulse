@@ -301,6 +301,6 @@ Zonaliser/
 - **Empty state on first run** — the dashboard shows no data until the first sync completes (~5 minutes). This is expected.
 - **Cold start proxy errors** — if the frontend loads before the backend is ready, Vite logs `ECONNREFUSED`. This resolves once the backend starts.
 - **No `.env` file support** — credentials must be exported from the shell environment. The backend does not call `dotenv`.
-- **Stale data window** — issues can be up to 3 hours old between scheduled syncs. Trigger a manual sync if fresher data is needed.
+- **Stale data window** — issues can be up to 1 hour old between scheduled syncs. Trigger a manual sync if fresher data is needed.
 - **No automated test suite** — validation is currently done via `tsx watch` and manual UI verification.
 - **CORS locked to `localhost:5173`** — change in `src/index.ts` if using a different frontend origin.

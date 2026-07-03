@@ -28,7 +28,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { fetchProject, fetchSprintEpics, fetchSyncStatus, fetchKanbanStaleCount, fetchPastSprintData, type EpicBreakdown, type Project, type SprintSnapshot } from '../api/client';
+import { fetchProject, fetchSprintEpics, fetchKanbanStaleCount, fetchPastSprintData, type EpicBreakdown, type Project, type SprintSnapshot } from '../api/client';
 import { SprintCard } from '../components/SprintCard';
 import { EpicCard } from '../components/EpicCard';
 import { SprintProgressCard } from '../components/SprintProgressCard';
@@ -37,7 +37,6 @@ import { UserLoadCard } from '../components/UserLoadCard';
 import { UserCompletionCard } from '../components/UserCompletionCard';
 import { UserStaleCard } from '../components/UserStaleCard';
 import { TicketRaiserCard } from '../components/TicketRaiserCard';
-import { LastSyncedFooter } from '../components/LastSyncedFooter';
 import { StaleManagerModal, loadStaleConfig, type StaleConfig } from '../components/StaleManagerModal';
 import { sortByRole } from '../components/UserAvatar';
 
@@ -120,7 +119,6 @@ export function BoardPage() {
   const [epicsLoading, setEpicsLoading] = useState(false);
   const [sprintStatusGroups, setSprintStatusGroups] = useState<Record<string, string>>({});
   const [showStaleModal, setShowStaleModal] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [kanbanStaleCount, setKanbanStaleCount] = useState<number | null>(null);
 
   // Stale config — loaded from localStorage once project is known.
@@ -131,11 +129,6 @@ export function BoardPage() {
   const watchedStates = staleConfig.watchedStates;
 
   // ── Effects ─────────────────────────────────────────────────────────────
-
-  // Fetch last synced timestamp once on mount.
-  useEffect(() => {
-    fetchSyncStatus().then(({ lastSyncedAt: ts }) => setLastSyncedAt(ts)).catch(() => {});
-  }, []);
 
   // Load project data, resolve the selected sprint, and initialise stale config.
   //
@@ -568,7 +561,6 @@ export function BoardPage() {
       {!loading && project && project.boardType !== 'kanban' && project.activeSprints.length === 0 && (
         <p style={s.muted}>No active sprint found for this project.</p>
       )}
-      <LastSyncedFooter lastSyncedAt={lastSyncedAt} />
     </div>
   );
 }

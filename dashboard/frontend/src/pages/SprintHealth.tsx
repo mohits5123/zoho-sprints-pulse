@@ -22,7 +22,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchSprints, syncSprints, fetchSyncStatus, fetchPastSprintNames, fetchPastSprintData, fetchProjects, SprintSnapshot, Project, PastSprintName, updateSprintDisplay } from '../api/client';
 import { SprintCard } from '../components/SprintCard';
-import { LastSyncedFooter } from '../components/LastSyncedFooter';
 import { SyncButton } from '../components/SyncButton';
 import { useSyncProgress } from '../contexts/SyncProgressContext';
 
@@ -55,7 +54,6 @@ export function SprintHealth() {
   const [sprints, setSprints]   = useState<SprintSnapshot[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showPastModal, setShowPastModal] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -87,7 +85,6 @@ export function SprintHealth() {
       .then((d) => setSprints(d.sprints))
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-    fetchSyncStatus().then(({ lastSyncedAt: ts }) => setLastSyncedAt(ts)).catch(() => {});
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
@@ -231,20 +228,16 @@ export function SprintHealth() {
   async function handleSync() {
     setError(null);
     setSyncActive(true);
-    const prevSyncedAt = lastSyncedAt;
     try {
       await syncSprints();
       pollRef.current = setInterval(async () => {
         try {
-          const { lastSyncedAt: ts } = await fetchSyncStatus();
-          if (ts && ts !== prevSyncedAt) {
-            clearInterval(pollRef.current!);
-            pollRef.current = null;
-            const updated = await fetchSprints();
-            setSprints(updated.sprints);
-            setLastSyncedAt(ts);
-            setSyncActive(false);
-          }
+          await fetchSyncStatus();
+          const updated = await fetchSprints();
+          setSprints(updated.sprints);
+          clearInterval(pollRef.current!);
+          pollRef.current = null;
+          setSyncActive(false);
         } catch { /* keep polling */ }
       }, 5_000);
     } catch (err) {
@@ -356,8 +349,6 @@ export function SprintHealth() {
           )}
         </>
       )}
-      <LastSyncedFooter lastSyncedAt={lastSyncedAt} />
-
       {showPastModal && (
         <div style={s.modalOverlay} onClick={() => setShowPastModal(false)}>
           <div style={s.modal} onClick={(e) => e.stopPropagation()}>

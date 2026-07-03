@@ -2,7 +2,7 @@
  * Sync Status API - Returns the timestamp of the last successful data sync.
  *
  * The lastSyncedAt timestamp is updated during:
- * - Cron job execution (every 3 hours)
+ * - Cron job execution (every 1 hours)
  * - Manual sync via POST /api/sprints/sync or POST /api/projects/sync
  */
 

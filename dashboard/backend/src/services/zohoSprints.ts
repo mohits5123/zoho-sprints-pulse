@@ -17,7 +17,7 @@
  * zohoThrottle with per-label 25 req/60s sliding windows. Critical: bypassing throttle
  * will lock the entire team's Zoho API access (HTTP 400). See src/services/rateLimiter.ts.
  * 
- * **Sync Flow** (runs every 3 hours via cron or manual trigger):
+ * **Sync Flow** (runs every 1 hour via cron or manual trigger):
  * 1. Clear in-memory caches → reset rate limiter stats
  * 2. Resolve Zoho team ID from settings
  * 3. Fetch all visible scrum/kanban projects
@@ -1227,7 +1227,7 @@ export function clearZohoCache(): void {
 /**
  * Full synchronization of all Zoho Projects data to the local SQLite database.
  * 
- * This is the main sync operation triggered by cron (every 3 hours) and manual user requests.
+ * This is the main sync operation triggered by cron (every 1 hour) and manual user requests.
  * It fetches all projects, epics, sprints, backlog items, and issues from the Zoho Sprints API
  * and upserts them to the local database.
  * 
@@ -1264,7 +1264,7 @@ export function clearZohoCache(): void {
  * stop the sync. Other projects continue processing. Partial data is acceptable — the
  * next sync run will pick up where the last one left off.
  * 
- * **Cron Schedule**: Runs automatically every 3 hours at minute 0 (midnight, 3am, 6am, etc.)
+ * **Cron Schedule**: Runs automatically every 1 hour at minute 0 (midnight, 1am, 2am, etc.)
  * 
  * @returns The total number of sprints successfully synced across all projects
  */

@@ -53,10 +53,12 @@ const s: Record<string, React.CSSProperties> = {
     paddingTop: 16,
     borderTop: '1px solid #1e293b',
     fontSize: 12,
-    color: '#334155',
+    color: '#e2e8f0',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     display: 'flex',
     alignItems: 'center',
     gap: 6,
+    padding: '16px 24px',
   },
 
   /**

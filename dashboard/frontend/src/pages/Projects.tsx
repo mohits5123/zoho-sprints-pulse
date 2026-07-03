@@ -28,9 +28,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   fetchProjects, syncProjects, updateProjectBoardType,
-  updateProjectDisplay, reorderProjects, fetchSyncStatus, Project,
+  updateProjectDisplay, reorderProjects, Project,
 } from '../api/client';
-import { LastSyncedFooter } from '../components/LastSyncedFooter';
 import { SyncButton } from '../components/SyncButton';
 import { useSyncProgress } from '../contexts/SyncProgressContext';
 
@@ -384,8 +383,6 @@ export function Projects() {
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
   const [hiddenOpen, setHiddenOpen] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
-
   // DnD state
   const dragIndex = useRef<number | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
@@ -395,7 +392,6 @@ export function Projects() {
       .then((d) => setProjects([...d.projects].sort((a, b) => a.displayOrder - b.displayOrder)))
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-    fetchSyncStatus().then(({ lastSyncedAt: ts }) => setLastSyncedAt(ts)).catch(() => {});
   }, []);
 
   /**
@@ -408,7 +404,6 @@ export function Projects() {
     try {
       const result = await syncProjects();
       setProjects([...result.projects].sort((a, b) => a.displayOrder - b.displayOrder));
-      fetchSyncStatus().then(({ lastSyncedAt: ts }) => setLastSyncedAt(ts)).catch(() => {});
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed');
       setSyncActive(false); // on error deactivate immediately; no background sync to complete
@@ -574,7 +569,6 @@ export function Projects() {
           )}
         </div>
       )}
-      <LastSyncedFooter lastSyncedAt={lastSyncedAt} />
     </div>
   );
 }

@@ -12,6 +12,7 @@
  * @see {@link BoardPage} - Kanban/Scrum board view for a project
  * @see {@link IssueListPage} - Detailed issue list for a project
  */
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Home } from './pages/Home';
 import { Users } from './pages/Users';
@@ -21,8 +22,10 @@ import { BoardPage } from './pages/BoardPage';
 import { IssueListPage } from './pages/IssueListPage';
 import { UserProfilePage } from './pages/UserProfilePage';
 import { BacklogPage } from './pages/BacklogPage';
+import { LastSyncedFooter } from './components/LastSyncedFooter';
 import { SyncProgressBar } from './components/SyncProgressBar';
 import { SyncProgressProvider } from './contexts/SyncProgressContext';
+import { fetchSyncStatus } from './api/client';
 
 /**
  * Root application component that renders the navigation structure.
@@ -49,9 +52,15 @@ import { SyncProgressProvider } from './contexts/SyncProgressContext';
  *
  * @returns The rendered application shell with routing and progress tracking.
  */
-export default function App() {
+function AppContent() {
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchSyncStatus().then(({ lastSyncedAt: ts }) => setLastSyncedAt(ts)).catch(() => {});
+  }, []);
+
   return (
-    <SyncProgressProvider>
+    <>
       <BrowserRouter>
         <SyncProgressBar />
         <Routes>
@@ -65,6 +74,15 @@ export default function App() {
           <Route path="/backlog/:projectId" element={<BacklogPage />} />
         </Routes>
       </BrowserRouter>
+      <LastSyncedFooter lastSyncedAt={lastSyncedAt} />
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <SyncProgressProvider>
+      <AppContent />
     </SyncProgressProvider>
   );
 }
