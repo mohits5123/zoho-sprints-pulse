@@ -14,6 +14,7 @@ import healthRouter from './routes/health';
 import statusRouter from './routes/status';
 import usersRouter from './routes/users';
 import projectsRouter from './routes/projects';
+import issuesRouter from './routes/issues';
 import sprintsRouter from './routes/sprints';
 import appConfigRouter from './routes/appConfig';
 import syncStatusRouter from './routes/syncStatus';
@@ -45,6 +46,11 @@ router.use('/users', usersRouter);
  * Mount project endpoints at /api/projects - fetch projects, sync project list, manage board settings
  */
 router.use('/projects', projectsRouter);
+
+/**
+ * Mount issue endpoints at /api/issues - fetch individual issues by ID
+ */
+router.use('/issues', issuesRouter);
 
 /**
  * Mount sprint endpoints at /api/sprints - fetch sprints, sync sprints (fire-and-forget)

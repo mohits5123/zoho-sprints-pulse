@@ -22,10 +22,12 @@ import {
   searchUsers, searchIssues,
   fetchDeadlines, createDeadline, updateDeadline, deleteDeadline, fetchUpcomingDeadlines,
   fetchNotifications, markNotificationRead, clearReadNotifications,
-  fetchWatchlist, toggleImportant,
+  fetchWatchlist, toggleImportant, fetchIssueById, fetchAppConfig, fetchProject,
   type NoteEntry, type UserSearchResult, type IssueSearchResult, type DeadlineEntry,
-  type ActivityNotification, type WatchlistEntry,
+  type ActivityNotification, type WatchlistEntry, type IssueItem,
 } from '../api/client';
+import { IssueRow } from '../components/IssueRow';
+import { BackButton } from '../components/BackButton';
 
 type Tab = 'watchlist' | 'notes' | 'deadlines';
 
@@ -73,7 +75,10 @@ export function ActivityPage() {
     <div style={s.page}>
       <header style={s.header}>
         <div style={s.headerTop}>
-          <h1 style={s.title}>Activity</h1>
+          <div style={s.headerLeft}>
+            <BackButton />
+            <h1 style={s.title}>Activity</h1>
+          </div>
           {notifications.length > 0 && (
             <div style={s.notificationBell}>
               <button
@@ -161,8 +166,16 @@ export function ActivityPage() {
 
 function WatchlistTab() {
   const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
-  const [issueDetails, setIssueDetails] = useState<Map<string, IssueSearchResult>>(new Map());
+  const [issues, setIssues] = useState<Map<string, IssueItem>>(new Map());
+  const [projectNumbers, setProjectNumbers] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [workspaceName, setWorkspaceName] = useState('');
+
+  // Fetch workspace name for Zoho URL construction
+  useEffect(() => {
+    fetchAppConfig().then(({ workspaceName: wn }) => setWorkspaceName(wn)).catch(() => {});
+  }, []);
 
   // Load watchlist on mount
   useEffect(() => {
@@ -181,24 +194,51 @@ function WatchlistTab() {
     return () => { cancelled = true; };
   }, []);
 
-  // Fetch issue details for each watchlist entry
+  // Fetch full issue details for each watchlist entry
   useEffect(() => {
     if (watchlist.length === 0) return;
 
     const fetchDetails = async () => {
-      const details = new Map<string, IssueSearchResult>();
+      const details = new Map<string, IssueItem>();
       for (const entry of watchlist) {
-        try {
-          const { issues } = await searchIssues(entry.issueId);
-          const match = issues.find(i => i.zohoId === entry.issueId);
-          if (match) details.set(entry.issueId, match);
-        } catch { /* skip */ }
+        const issue = await fetchIssueById(entry.issueId);
+        if (issue) details.set(entry.issueId, issue);
       }
-      setIssueDetails(details);
+      setIssues(details);
     };
 
     fetchDetails();
   }, [watchlist]);
+
+  // Fetch project numbers for each unique boardId
+  useEffect(() => {
+    if (watchlist.length === 0) return;
+
+    const fetchProjectNumbers = async () => {
+      const uniqueBoardIds = Array.from(new Set(watchlist.map(w => w.boardId)));
+      const projNoMap = new Map<string, string>();
+      
+      for (const boardId of uniqueBoardIds) {
+        try {
+          const { project } = await fetchProject(boardId);
+          if (project.projNo) {
+            projNoMap.set(boardId, project.projNo);
+          }
+        } catch { /* skip */ }
+      }
+      
+      setProjectNumbers(projNoMap);
+    };
+
+    fetchProjectNumbers();
+  }, [watchlist]);
+
+  const copyItemUrl = (url: string, itemNo: string) => {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(itemNo);
+      setTimeout(() => setCopied(null), 1500);
+    });
+  };
 
   const handleToggleImportant = async (issueId: string) => {
     try {
@@ -206,6 +246,15 @@ function WatchlistTab() {
       // Refetch watchlist to get updated state
       const { watchlist: data } = await fetchWatchlist(undefined, 'local');
       setWatchlist(data);
+      // Also update the issue's _important flag
+      const issue = await fetchIssueById(issueId);
+      if (issue) {
+        setIssues(prev => {
+          const next = new Map(prev);
+          next.set(issueId, issue);
+          return next;
+        });
+      }
     } catch (err) {
       console.error('Failed to toggle important:', err);
     }
@@ -230,29 +279,33 @@ function WatchlistTab() {
   return (
     <div style={s.tabContent}>
       <div style={s.watchlistList}>
+        {/* Column headers matching IssueRow */}
+        <div style={s.watchlistHeader}>
+          <span style={{ ...s.watchlistCol, width: 24 }}></span>
+          <span style={{ ...s.watchlistCol, ...s.watchlistColId }}>ID</span>
+          <span style={{ ...s.watchlistCol, flex: 1 }}>Title</span>
+          <span style={{ ...s.watchlistCol, ...s.watchlistColStatus }}>Status</span>
+          <span style={{ ...s.watchlistCol, ...s.watchlistColUser }}>Creator</span>
+          <span style={{ ...s.watchlistCol, ...s.watchlistColUser }}>Assignee</span>
+          <span style={{ ...s.watchlistCol, ...s.watchlistColDate }}>Created</span>
+          <span style={{ ...s.watchlistCol, ...s.watchlistColDelay }}>Delayed</span>
+        </div>
         {watchlist.map(entry => {
-          const issue = issueDetails.get(entry.issueId);
+          const issue = issues.get(entry.issueId);
+          if (!issue) return null;
+          const projNo = projectNumbers.get(entry.boardId) ?? '';
           return (
-            <div key={entry.id} style={s.watchlistItem}>
-              <div style={s.watchlistItemContent}>
-                <div style={s.watchlistItemHeader}>
-                  <span style={s.watchlistItemTitle}>{issue?.title ?? 'Loading...'}</span>
-                  <button
-                    style={{
-                      ...s.starBtn,
-                      color: entry.important ? '#fbbf24' : '#334155',
-                    }}
-                    onClick={() => handleToggleImportant(entry.issueId)}
-                    title={entry.important ? 'Remove from important' : 'Mark as important'}
-                  >
-                    ★
-                  </button>
-                </div>
-                <div style={s.watchlistItemMeta}>
-                  <span style={s.watchlistItemBoard}>{entry.boardId}</span>
-                </div>
-              </div>
-            </div>
+            <IssueRow
+              key={entry.id}
+              issue={issue}
+              staleDays={7}
+              watchedStates={[]}
+              workspaceName={workspaceName}
+              projNo={projNo}
+              copied={copied}
+              onCopy={copyItemUrl}
+              onToggleImportant={handleToggleImportant}
+            />
           );
         })}
       </div>
@@ -282,6 +335,7 @@ function NotesTab() {
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionUsers, setMentionUsers] = useState<UserSearchResult[]>([]);
   const [mentionIdx, setMentionIdx] = useState(0);
+  const [mentionPosition, setMentionPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Issue linking state
@@ -294,6 +348,46 @@ function NotesTab() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedNote = notes.find(n => n.id === selectedId) ?? null;
+
+  // Calculate cursor position in textarea
+  const calculateCursorCoordinates = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return { top: 0, left: 0 };
+
+    const text = textarea.value.substring(0, textarea.selectionStart);
+    const lines = text.split('\n');
+    const currentLine = lines[lines.length - 1];
+    const lineNumber = lines.length - 1;
+
+    // Create a hidden div to measure text position
+    const div = document.createElement('div');
+    const computedStyle = window.getComputedStyle(textarea);
+    
+    div.style.position = 'absolute';
+    div.style.visibility = 'hidden';
+    div.style.whiteSpace = 'pre-wrap';
+    div.style.wordWrap = 'break-word';
+    div.style.width = `${textarea.clientWidth}px`;
+    div.style.font = computedStyle.font;
+    div.style.fontFamily = computedStyle.fontFamily;
+    div.style.fontSize = computedStyle.fontSize;
+    div.style.fontWeight = computedStyle.fontWeight;
+    div.style.lineHeight = computedStyle.lineHeight;
+    div.style.padding = computedStyle.padding;
+    div.style.border = computedStyle.border;
+    div.style.boxSizing = computedStyle.boxSizing;
+    
+    div.textContent = currentLine;
+    document.body.appendChild(div);
+    
+    const rect = div.getBoundingClientRect();
+    const left = rect.width + parseInt(computedStyle.paddingLeft);
+    const top = lineNumber * parseFloat(computedStyle.lineHeight) + parseInt(computedStyle.paddingTop);
+    
+    document.body.removeChild(div);
+    
+    return { top, left };
+  }, []);
 
   // Load notes on mount
   useEffect(() => {
@@ -386,6 +480,9 @@ function NotesTab() {
     if (atMatch) {
       setMentionOpen(true);
       setMentionIdx(0);
+      // Calculate cursor position for dropdown placement
+      const coords = calculateCursorCoordinates();
+      setMentionPosition(coords);
       // Fetch users
       searchUsers(atMatch[1]).then(({ users }) => {
         setMentionUsers(users);
@@ -393,7 +490,7 @@ function NotesTab() {
     } else {
       setMentionOpen(false);
     }
-  }, [selectedId, scheduleSave]);
+  }, [selectedId, scheduleSave, calculateCursorCoordinates]);
 
   const insertMention = useCallback((user: UserSearchResult) => {
     const textarea = textareaRef.current;
@@ -559,7 +656,11 @@ function NotesTab() {
               />
               {/* @mention dropdown */}
               {mentionOpen && mentionUsers.length > 0 && (
-                <div style={s.mentionDropdown}>
+                <div style={{
+                  ...s.mentionDropdown,
+                  top: mentionPosition.top,
+                  left: mentionPosition.left,
+                }}>
                   {mentionUsers.map((user, idx) => (
                     <div
                       key={user.id}
@@ -1062,8 +1163,6 @@ const s: Record<string, React.CSSProperties> = {
   },
   mentionDropdown: {
     position: 'absolute' as const,
-    top: '100%',
-    left: 0,
     backgroundColor: '#1e293b',
     border: '1px solid #334155',
     borderRadius: 6,
@@ -1471,54 +1570,46 @@ const s: Record<string, React.CSSProperties> = {
 
   // ── Watchlist ───────────────────────────────────────────────────────────────
   watchlistList: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: 8,
+    border: '1px solid #1e293b',
+    borderRadius: 10,
+    overflow: 'hidden',
   },
-  watchlistItem: {
-    backgroundColor: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: 6,
-    padding: 12,
-  },
-  watchlistItemContent: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: 8,
-  },
-  watchlistItemHeader: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  watchlistItemTitle: {
-    fontSize: 14,
-    fontWeight: 600,
-    color: '#e2e8f0',
-    flex: 1,
-  },
-  starBtn: {
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: 16,
-    padding: '0 2px',
-    lineHeight: 1,
-    transition: 'color 0.15s',
-    flexShrink: 0,
-  },
-  watchlistItemMeta: {
+  watchlistHeader: {
     display: 'flex',
     alignItems: 'center',
-    gap: 12,
+    padding: '10px 16px',
+    backgroundColor: '#1e293b',
+    borderBottom: '1px solid #334155',
     fontSize: 12,
-  },
-  watchlistItemStatus: {
-    color: '#94a3b8',
-  },
-  watchlistItemBoard: {
     color: '#64748b',
-    fontFamily: 'monospace',
+    fontWeight: 600,
+  },
+  watchlistCol: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  watchlistColId: {
+    width: 80,
+  },
+  watchlistColStatus: {
+    width: 140,
+  },
+  watchlistColUser: {
+    width: 80,
+    justifyContent: 'center' as const,
+  },
+  watchlistColDate: {
+    width: 100,
+    justifyContent: 'flex-end' as const,
+  },
+  watchlistColDelay: {
+    width: 72,
+    justifyContent: 'flex-end' as const,
+  },
+  headerLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 20,
   },
 };

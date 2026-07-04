@@ -583,6 +583,41 @@ export async function queryBacklogIssues(
 }
 
 /**
+ * Query a single issue by its Zoho ID.
+ * Returns the full IssueItem with all computed fields.
+ *
+ * @param issueZohoId - The Zoho ID of the issue to fetch
+ * @param staleDays - Threshold in days for staleness (default: 7)
+ * @param watchedStates - Array of statuses to watch for staleness
+ * @returns The IssueItem or null if not found
+ */
+export async function queryIssueById(
+  issueZohoId: string,
+  staleDays: number = 7,
+  watchedStates: string[] = [],
+): Promise<IssueItem | null> {
+  const dbIssue = await prisma.issue.findUnique({
+    where: { zohoId: issueZohoId },
+  });
+
+  if (!dbIssue) return null;
+
+  const userMap = await buildUserMap();
+  const issue = toIssueItem(dbIssue, userMap, staleDays, watchedStates);
+
+  // Mark as important if in watchlist
+  const watchlist = await prisma.watchlist.findFirst({
+    where: { issueId: issueZohoId, userId: 'local' },
+    select: { important: true },
+  });
+  if (watchlist) {
+    issue._important = watchlist.important;
+  }
+
+  return issue;
+}
+
+/**
  * Query epic breakdown for a sprint from local SQLite database.
  * Used by the /epics route to show Epic cards with issue distribution.
  *

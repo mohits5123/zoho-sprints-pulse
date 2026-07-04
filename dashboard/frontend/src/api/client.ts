@@ -408,6 +408,21 @@ export async function fetchIssuesKanban(
 }
 
 /**
+ * Fetch a single issue by its Zoho ID.
+ *
+ * @param issueId - The Zoho ID of the issue to fetch.
+ * @returns The IssueItem or null if not found.
+ */
+export async function fetchIssueById(issueId: string): Promise<IssueItem | null> {
+  try {
+    const res = await apiClient.get<{ issue: IssueItem }>(`/issues/${issueId}`);
+    return res.data.issue;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Fetch stale count for a kanban board.
  *
  * @param projectId - The Zoho ID of the kanban project.
