@@ -19,7 +19,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { fetchIssues, fetchIssuesKanban, fetchProject, fetchAppConfig, type IssueItem } from '../api/client';
+import { fetchIssues, fetchIssuesKanban, fetchProject, fetchAppConfig, toggleImportant, type IssueItem } from '../api/client';
 import { UserAvatar } from '../components/UserAvatar';
 
 /**
@@ -187,7 +187,9 @@ export function IssueListPage() {
             {subtitle && <p style={s.subtitle}>{subtitle}</p>}
           </div>
         </div>
-        {!loading && <span style={s.count}>{issues.length} issue{issues.length !== 1 ? 's' : ''}</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {!loading && <span style={s.count}>{issues.length} issue{issues.length !== 1 ? 's' : ''}</span>}
+        </div>
       </header>
 
       {loading && <p style={s.muted}>Loading issues…</p>}
@@ -220,6 +222,25 @@ export function IssueListPage() {
               projNo={projNo}
               copied={copied}
               onCopy={copyItemUrl}
+              boardId={projectId ?? ''}
+              userId={userId ?? ''}
+              onToggleImportant={async (issueId: string) => {
+                try {
+                  await toggleImportant(issueId, projectId ?? '', 'local');
+                  // Refetch issues to get updated important state
+                  if (boardType === 'kanban') {
+                    const { issues: data } = await fetchIssuesKanban(projectId!, { status, statusGroup, epicId, userId, creatorOnly, stale, staleDays, watchedStates });
+                    const ORDER: Record<string, number> = { todo: 0, doing: 1, done: 2 };
+                    setIssues(data.sort((a, b) => (ORDER[a.statusGroup] ?? 1) - (ORDER[b.statusGroup] ?? 1)));
+                  } else if (sprintId) {
+                    const { issues: data } = await fetchIssues(projectId!, sprintId, { status, statusGroup, epicId, userId, creatorOnly, stale, staleDays, watchedStates });
+                    const ORDER: Record<string, number> = { todo: 0, doing: 1, done: 2 };
+                    setIssues(data.sort((a, b) => (ORDER[a.statusGroup] ?? 1) - (ORDER[b.statusGroup] ?? 1)));
+                  }
+                } catch (err) {
+                  console.error('Failed to toggle important:', err);
+                }
+              }}
             />
           ))}
         </div>
@@ -263,6 +284,7 @@ function IssueRow({
   projNo,
   copied,
   onCopy,
+  onToggleImportant,
 }: {
   issue: IssueItem;
   staleDays: number;
@@ -271,6 +293,9 @@ function IssueRow({
   projNo: string;
   copied: string | null;
   onCopy: (url: string, itemNo: string) => void;
+  boardId: string;
+  userId: string;
+  onToggleImportant: (issueId: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const dotColor = GROUP_COLORS[issue.statusGroup as StatusGroup] ?? '#94a3b8';
@@ -304,6 +329,24 @@ function IssueRow({
       onMouseLeave={() => setHovered(false)}
       onClick={zohoUrl ? () => window.open(zohoUrl, '_blank', 'noopener,noreferrer') : undefined}
     >
+      {/* Star/Important toggle */}
+      <div style={{ width: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <button
+          style={{
+            ...s.starBtn,
+            color: issue._important ? '#fbbf24' : '#334155',
+            opacity: hovered || issue._important ? 1 : 0.3,
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleImportant(issue.zohoId);
+          }}
+          title={issue._important ? 'Remove from important' : 'Mark as important'}
+        >
+          ★
+        </button>
+      </div>
+
       {/* ID */}
       <div style={{ ...s.col, ...s.colId, display: 'flex', alignItems: 'center', gap: 4 }}>
         <span style={{ ...s.itemNo, color: zohoUrl && hovered ? '#60a5fa' : undefined }}>#{issue.itemNo}</span>
@@ -422,6 +465,11 @@ const s: Record<string, React.CSSProperties> = {
     background: 'none', border: 'none', cursor: 'pointer',
     fontSize: 16, padding: '0 3px', lineHeight: 1,
     transition: 'opacity 0.15s, color 0.15s',
+  },
+  starBtn: {
+    background: 'none', border: 'none', cursor: 'pointer',
+    fontSize: 14, padding: '0 2px', lineHeight: 1,
+    transition: 'color 0.15s, opacity 0.15s',
   },
   dash: { fontSize: 13, color: '#334155' },
 };

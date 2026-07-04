@@ -57,6 +57,7 @@ import prisma from '../db/client';
 import { recordBurndownSnapshot } from './burndownSnapshots';
 import { zohoThrottle } from './rateLimiter';
 import { startSync, completeSync, touchLastSyncedAt } from './syncStatus';
+import { checkWatchedIssueStatusChanges } from './activitySync';
 
 
 const SETTINGS_KEY_TEAM_ID = 'zoho_team_id';
@@ -1201,6 +1202,7 @@ export interface IssueItem {
   
   delayedDays: number;          // Days past due date (negative if not overdue)
   isStale:     boolean;          // True if no update in staleDays threshold
+  _important?: boolean;          // Local-only: true if marked important in watchlist
 }
 
 /**
@@ -1619,5 +1621,7 @@ export async function runFullSync(): Promise<number> {
   const synced = await syncAll();
   await touchLastSyncedAt();
   await completeSync(zohoThrottle.sent);
+  // Check for status changes in watched issues and create notifications
+  await checkWatchedIssueStatusChanges();
   return synced;
 }
