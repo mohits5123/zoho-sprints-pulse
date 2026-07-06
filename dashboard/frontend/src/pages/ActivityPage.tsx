@@ -1,35 +1,20 @@
-/**
- * Activity page component.
- *
- * Main entry point for the Activity section with three sections:
- * - Deadlines: Empty card at the top (placeholder for future)
- * - Watchlist: View and manage important tickets grouped by board
- * - Notes: Create and manage notes with @mentions and issue links
- *
- * Features:
- * - Watchlist shows important issues grouped by board/sprint
- * - Notes support @mentions and issue linking
- * - Deadlines placeholder card at the top
- *
- * Data flows:
- * - All data is local-first, stored in SQLite
- * - No Zoho API calls at runtime
- */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell, Plus, Calendar, Eye, FileText, X, ArrowLeft, Trash2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Bell, Plus, Calendar, Eye, FileText, X, ArrowRight } from 'lucide-react';
 import {
-  fetchNotes, createNote, updateNote, deleteNote,
-  searchUsers, searchIssues,
+  fetchNotes, deleteNote,
   fetchNotifications, markNotificationRead,
   fetchWatchlist, toggleImportant, fetchIssueById, fetchAppConfig, fetchProject,
-  type NoteEntry, type UserSearchResult, type IssueSearchResult,
-  type ActivityNotification, type WatchlistEntry, type IssueItem,
+  fetchCombinedDeadlines,
+  type NoteEntry, type ActivityNotification, type WatchlistEntry, type IssueItem,
+  type CombinedDeadline,
 } from '../api/client';
 import { WatchlistCompactRow } from '../components/WatchlistCompactRow';
 import { BackButton } from '../components/BackButton';
 import { C, R, font } from '../theme';
 
 export function ActivityPage() {
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState<ActivityNotification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [workspaceName, setWorkspaceName] = useState('');
@@ -37,26 +22,21 @@ export function ActivityPage() {
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const notificationRef = useRef<HTMLDivElement>(null);
 
-  // Close notification dropdown when clicking outside
   useEffect(() => {
     if (!showNotifications) return;
-
     const handleClickOutside = (event: MouseEvent) => {
       if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
         setShowNotifications(false);
       }
     };
-
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showNotifications]);
 
-  // Fetch workspace name for Zoho URL construction
   useEffect(() => {
     fetchAppConfig().then(({ workspaceName: wn }) => setWorkspaceName(wn)).catch(() => {});
   }, []);
 
-  // Poll for notifications every 60 seconds
   useEffect(() => {
     const loadNotifications = async () => {
       try {
@@ -66,19 +46,17 @@ export function ActivityPage() {
         console.error('Failed to load notifications:', err);
       }
     };
-
     loadNotifications();
-    const interval = setInterval(loadNotifications, 60 * 1000); // 60 seconds
+    const interval = setInterval(loadNotifications, 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch issue details for notifications to get itemNo
   useEffect(() => {
     if (notifications.length === 0) return;
-
     const fetchDetails = async () => {
       const results = await Promise.all(
         notifications.map(async (notif) => {
+          if (notif.type !== 'status_change' || !notif.issueId) return null;
           const issue = await fetchIssueById(notif.issueId);
           const project = await fetchProject(notif.boardId).catch(() => null);
           return {
@@ -89,12 +67,11 @@ export function ActivityPage() {
         })
       );
       const details = new Map<string, { itemNo: string; projNo: string }>();
-      for (const { issueId, itemNo, projNo } of results) {
-        if (itemNo) details.set(issueId, { itemNo, projNo });
+      for (const r of results) {
+        if (r && r.itemNo) details.set(r.issueId, { itemNo: r.itemNo, projNo: r.projNo });
       }
       setIssueDetails(details);
     };
-
     fetchDetails();
   }, [notifications]);
 
@@ -133,10 +110,7 @@ export function ActivityPage() {
             <h1 style={s.title}>Activity</h1>
           </div>
           <div ref={notificationRef} style={s.notificationBell}>
-            <button
-              style={s.bellButton}
-              onClick={() => setShowNotifications(!showNotifications)}
-            >
+            <button style={s.bellButton} onClick={() => setShowNotifications(!showNotifications)}>
               <Bell size={20} strokeWidth={1.5} color={C.inkMuted} />
               {unreadCount > 0 && <span style={s.bellBadge}>{unreadCount}</span>}
             </button>
@@ -144,17 +118,25 @@ export function ActivityPage() {
               <div style={s.notificationDropdown}>
                 <div style={s.notificationHeader}>
                   <span style={s.notificationTitle}>Notifications</span>
-                  {unreadCount > 0 && (
-                    <button style={s.markAllReadBtn} onClick={handleMarkAllRead}>Mark all as read</button>
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    {unreadCount > 0 && (
+                      <button style={s.markAllReadBtn} onClick={handleMarkAllRead}>Mark all as read</button>
+                    )}
+                    {notifications.length > 0 && (
+                      <button style={s.viewAllBtn} onClick={() => { setShowNotifications(false); navigate('/notifications'); }}>
+                        View All <ArrowRight size={12} strokeWidth={1.5} style={{ marginLeft: 4 }} />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div style={s.notificationList}>
                   {notifications.length === 0 ? (
                     <div style={s.notificationEmpty}>No notifications</div>
                   ) : (
-                    notifications.map(notif => {
+                    notifications.slice(0, 10).map(notif => {
                       const isUnread = !notif.read && !readIds.has(notif.id);
-                      const issueDetail = issueDetails.get(notif.issueId);
+                      const isStatusChange = notif.type === 'status_change' || !notif.type;
+                      const issueDetail = isStatusChange ? issueDetails.get(notif.issueId) : null;
                       const zohoUrl = workspaceName && issueDetail?.projNo && issueDetail?.itemNo
                         ? `https://sprints.zoho.in/workspace/${workspaceName}#P${issueDetail.projNo}/itemdetails/I${issueDetail.itemNo}`
                         : null;
@@ -169,32 +151,30 @@ export function ActivityPage() {
                         >
                           <div style={s.notificationContent}>
                             <div style={s.notificationText}>
-                              Issue{' '}
-                              {zohoUrl ? (
-                                <a
-                                  href={zohoUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  style={s.notificationLink}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (isUnread) handleMarkRead(notif.id);
-                                  }}
-                                >
-                                  #{issueDetail?.itemNo}
-                                </a>
+                              {isStatusChange ? (
+                                <>
+                                  Issue{' '}
+                                  {zohoUrl ? (
+                                    <a href={zohoUrl} target="_blank" rel="noopener noreferrer" style={s.notificationLink}
+                                      onClick={(e) => { e.stopPropagation(); if (isUnread) handleMarkRead(notif.id); }}>
+                                      #{issueDetail?.itemNo}
+                                    </a>
+                                  ) : (
+                                    <span style={s.notificationIssueId}>#{issueDetail?.itemNo ?? '—'}</span>
+                                  )}
+                                  {' '}status changed: <strong>{notif.oldStatus}</strong> → <strong>{notif.newStatus}</strong>
+                                </>
+                              ) : notif.type === 'deadline_reminder' ? (
+                                <>Deadline reminder: note deadline is tomorrow</>
+                              ) : notif.type === 'deadline_day_of' ? (
+                                <>Deadline today: note deadline is due today</>
                               ) : (
-                                <span style={s.notificationIssueId}>#{issueDetail?.itemNo ?? '—'}</span>
+                                <>Notification</>
                               )}
-                              {' '}status changed: <strong>{notif.oldStatus}</strong> → <strong>{notif.newStatus}</strong>
                             </div>
                             <div style={s.notificationTime}>
                               {new Date(notif.createdAt).toLocaleString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                hour: 'numeric',
-                                minute: '2-digit',
-                                hour12: true,
+                                month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
                               })}
                             </div>
                           </div>
@@ -210,20 +190,7 @@ export function ActivityPage() {
       </header>
 
       <div style={s.content}>
-        {/* Deadlines card - empty placeholder */}
-        <div style={s.deadlinesCard}>
-          <div style={s.cardHeader}>
-            <h2 style={s.cardTitle}>
-              <Calendar size={16} strokeWidth={1.5} color={C.inkSubtle} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-              Deadlines
-            </h2>
-          </div>
-          <div style={s.cardBody}>
-            <p style={s.placeholder}>Coming soon...</p>
-          </div>
-        </div>
-
-        {/* Watchlist and Notes side by side */}
+        <DeadlinesCard />
         <div style={s.twoColumnLayout}>
           <WatchlistCard />
           <NotesCard />
@@ -233,19 +200,114 @@ export function ActivityPage() {
   );
 }
 
+function DeadlinesCard() {
+  const navigate = useNavigate();
+  const [deadlines, setDeadlines] = useState<CombinedDeadline[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadDeadlines = useCallback(async () => {
+    try {
+      const { deadlines: data } = await fetchCombinedDeadlines();
+      const sorted = [...data].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+      setDeadlines(sorted.slice(0, 10));
+    } catch (err) {
+      console.error('Failed to load deadlines:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDeadlines();
+    const interval = setInterval(loadDeadlines, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [loadDeadlines]);
+
+  const formatDueDate = (dueDate: string) => {
+    const now = new Date();
+    const due = new Date(dueDate);
+    const diffMs = due.getTime() - now.getTime();
+    const diffHours = diffMs / (1000 * 60 * 60);
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMs < 0) {
+      const pastDays = Math.abs(diffDays);
+      if (pastDays === 0) return 'today';
+      if (pastDays === 1) return 'yesterday';
+      return `${pastDays}d ago`;
+    }
+    if (diffHours < 1) return 'in <1h';
+    if (diffHours < 24) return `in ${Math.ceil(diffHours)}h`;
+    if (diffDays === 0) return 'today';
+    if (diffDays === 1) return 'tomorrow';
+    return `in ${diffDays}d`;
+  };
+
+  return (
+    <div style={s.deadlinesCard}>
+      <div style={s.cardHeader}>
+        <h2 style={s.cardTitle}>
+          <Calendar size={16} strokeWidth={1.5} color={C.inkSubtle} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+          Deadlines
+        </h2>
+      </div>
+      <div style={s.cardBody}>
+        {loading ? (
+          <p style={s.placeholder}>Loading deadlines...</p>
+        ) : deadlines.length === 0 ? (
+          <p style={s.placeholder}>No deadlines set. Add a deadline to a note to see it here.</p>
+        ) : (
+          <>
+            <div style={s.deadlinesList}>
+              {deadlines.map(dl => (
+                <div
+                  key={`${dl.source}-${dl.id}`}
+                  style={{
+                    ...s.deadlineItem,
+                    ...(dl.isOverdue ? s.deadlineItemOverdue : {}),
+                  }}
+                  onClick={() => {
+                    if (dl.source === 'note' && dl.noteId) navigate(`/notes/${dl.noteId}`);
+                  }}
+                >
+                  <div style={s.deadlineItemLeft}>
+                    {dl.isOverdue && <span style={s.deadlineAlert}>!</span>}
+                    <span style={s.deadlineTitle}>{dl.title}</span>
+                    <span style={s.deadlineSource}>{dl.source === 'note' ? 'Note' : 'Deadline'}</span>
+                  </div>
+                  <span style={{
+                    ...s.deadlineDue,
+                    ...(dl.isOverdue ? { color: C.danger } : {}),
+                  }}>
+                    Due: {formatDueDate(dl.dueDate)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div style={s.cardFooter}>
+              <button style={s.viewAllBtn} onClick={() => navigate('/deadlines')}>
+                View All <ArrowRight size={12} strokeWidth={1.5} style={{ marginLeft: 4 }} />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function WatchlistCard() {
+  const navigate = useNavigate();
   const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
   const [issues, setIssues] = useState<Map<string, IssueItem>>(new Map());
   const [projects, setProjects] = useState<Map<string, { name: string; projNo: string }>>(new Map());
   const [loading, setLoading] = useState(true);
   const [workspaceName, setWorkspaceName] = useState('');
 
-  // Fetch workspace name for Zoho URL construction
   useEffect(() => {
     fetchAppConfig().then(({ workspaceName: wn }) => setWorkspaceName(wn)).catch(() => {});
   }, []);
 
-  // Load watchlist on mount
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -262,10 +324,8 @@ function WatchlistCard() {
     return () => { cancelled = true; };
   }, []);
 
-  // Fetch full issue details for each watchlist entry
   useEffect(() => {
     if (watchlist.length === 0) return;
-
     const fetchDetails = async () => {
       const results = await Promise.all(
         watchlist.map(async (entry) => {
@@ -279,14 +339,11 @@ function WatchlistCard() {
       }
       setIssues(details);
     };
-
     fetchDetails();
   }, [watchlist]);
 
-  // Fetch project details for each unique boardId
   useEffect(() => {
     if (watchlist.length === 0) return;
-
     const fetchProjectDetails = async () => {
       const uniqueBoardIds = Array.from(new Set(watchlist.map(w => w.boardId)));
       const results = await Promise.all(
@@ -305,17 +362,14 @@ function WatchlistCard() {
       }
       setProjects(projectMap);
     };
-
     fetchProjectDetails();
   }, [watchlist]);
 
   const handleToggleImportant = async (issueId: string, boardId: string) => {
     try {
       await toggleImportant(issueId, boardId, 'local');
-      // Refetch watchlist to get updated state
       const { watchlist: data } = await fetchWatchlist(undefined, 'local');
       setWatchlist(data);
-      // Also update the issue's _important flag
       const issue = await fetchIssueById(issueId);
       if (issue) {
         setIssues(prev => {
@@ -329,13 +383,25 @@ function WatchlistCard() {
     }
   };
 
-  // Group watchlist by boardId
-  const groupedByBoard = watchlist.reduce((acc, entry) => {
-    const boardId = entry.boardId;
-    if (!acc[boardId]) acc[boardId] = [];
-    acc[boardId].push(entry);
-    return acc;
-  }, {} as Record<string, WatchlistEntry[]>);
+  const groupedByBoard = (() => {
+    const sortedWatchlist = [...watchlist]
+      .map(entry => ({ entry, issue: issues.get(entry.issueId) }))
+      .filter(({ issue }) => issue !== undefined)
+      .sort((a, b) => {
+        const aDate = a.issue?.createdAt ? new Date(a.issue.createdAt).getTime() : 0;
+        const bDate = b.issue?.createdAt ? new Date(b.issue.createdAt).getTime() : 0;
+        return bDate - aDate;
+      })
+      .slice(0, 15)
+      .map(({ entry }) => entry);
+
+    return sortedWatchlist.reduce((acc, entry) => {
+      const boardId = entry.boardId;
+      if (!acc[boardId]) acc[boardId] = [];
+      acc[boardId].push(entry);
+      return acc;
+    }, {} as Record<string, WatchlistEntry[]>);
+  })();
 
   if (loading) {
     return (
@@ -383,12 +449,10 @@ function WatchlistCard() {
           const project = projects.get(boardId);
           const boardName = project?.name ?? 'Unknown Board';
           const projNo = project?.projNo ?? '';
-          
           return (
             <div key={boardId} style={s.boardGroup}>
               <div style={s.boardGroupHeader}>{boardName}</div>
               <div style={s.boardGroupContent}>
-                {/* Column headers */}
                 <div style={s.compactHeader}>
                   <span style={{ width: 32 }}></span>
                   <span style={{ ...s.compactCol, ...s.compactColId }}>ID</span>
@@ -417,116 +481,43 @@ function WatchlistCard() {
             </div>
           );
         })}
+        <div style={s.cardFooter}>
+          <button style={s.viewAllBtn} onClick={() => navigate('/watchlist')}>
+            View All <ArrowRight size={12} strokeWidth={1.5} style={{ marginLeft: 4 }} />
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-// ── Notes Card ────────────────────────────────────────────────────────────────
-
-/**
- * Parse a JSON string array field from a NoteEntry, returning [] on failure.
- */
-function parseJsonArray(raw: string): string[] {
-  try { return JSON.parse(raw) as string[]; } catch { return []; }
+function stripMarkdown(md: string): string {
+  return md
+    .replace(/#{1,6}\s/g, '')
+    .replace(/\*\*|__/g, '')
+    .replace(/\*|_/g, '')
+    .replace(/`{1,3}[^`]*`{1,3}/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '')
+    .replace(/>\s/g, '')
+    .replace(/[-*+]\s/g, '')
+    .replace(/\n/g, ' ')
+    .trim();
 }
 
 function NotesCard() {
+  const navigate = useNavigate();
   const [notes, setNotes] = useState<NoteEntry[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
-  const [linkedIssueIds, setLinkedIssueIds] = useState<string[]>([]);
-  const [taggedUserIds, setTaggedUserIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isEditing, setIsEditing] = useState(false);
 
-  // @mention state
-  const [mentionOpen, setMentionOpen] = useState(false);
-  const [mentionUsers, setMentionUsers] = useState<UserSearchResult[]>([]);
-  const [mentionIdx, setMentionIdx] = useState(0);
-  const [mentionPosition, setMentionPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // Issue linking state
-  const [issueSearchQuery, setIssueSearchQuery] = useState('');
-  const [issueSearchResults, setIssueSearchResults] = useState<IssueSearchResult[]>([]);
-  const [linkedIssueDetails, setLinkedIssueDetails] = useState<IssueSearchResult[]>([]);
-  const [issueSearchOpen, setIssueSearchOpen] = useState(false);
-
-  // Debounce timer ref for auto-save
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const selectedNote = notes.find(n => n.id === selectedId) ?? null;
-
-  // Calculate cursor position in textarea (returns viewport-relative coordinates)
-  const calculateCursorCoordinates = useCallback(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return { top: 0, left: 0 };
-
-    const text = textarea.value.substring(0, textarea.selectionStart);
-    const lines = text.split('\n');
-    const currentLine = lines[lines.length - 1];
-
-    // Create a hidden div to measure text position
-    const div = document.createElement('div');
-    const computedStyle = window.getComputedStyle(textarea);
-    
-    div.style.position = 'absolute';
-    div.style.visibility = 'hidden';
-    div.style.whiteSpace = 'pre-wrap';
-    div.style.wordWrap = 'break-word';
-    div.style.width = `${textarea.offsetWidth}px`;
-    div.style.font = computedStyle.font;
-    div.style.fontFamily = computedStyle.fontFamily;
-    div.style.fontSize = computedStyle.fontSize;
-    div.style.fontWeight = computedStyle.fontWeight;
-    div.style.lineHeight = computedStyle.lineHeight;
-    div.style.padding = computedStyle.padding;
-    div.style.border = computedStyle.border;
-    div.style.boxSizing = computedStyle.boxSizing;
-    
-    // Create a span to measure the text width
-    const span = document.createElement('span');
-    span.textContent = currentLine;
-    div.appendChild(span);
-    document.body.appendChild(div);
-    
-    const spanRect = span.getBoundingClientRect();
-    const divRect = div.getBoundingClientRect();
-    const lineHeight = parseFloat(computedStyle.lineHeight);
-    
-    // Calculate cursor position relative to the div's top-left corner
-    const cursorLeftInDiv = spanRect.right - divRect.left;
-    const cursorTopInDiv = spanRect.top - divRect.top;
-    
-    // Get textarea's position in viewport
-    const textareaRect = textarea.getBoundingClientRect();
-    
-    // Calculate cursor position in viewport
-    // The cursor is at (cursorLeftInDiv, cursorTopInDiv) relative to the div
-    // The div has the same dimensions as the textarea
-    // So the cursor is at (textareaRect.left + cursorLeftInDiv, textareaRect.top + cursorTopInDiv) in viewport
-    const cursorLeftInViewport = textareaRect.left + cursorLeftInDiv;
-    const cursorTopInViewport = textareaRect.top + cursorTopInDiv;
-    
-    // Position dropdown below the cursor line
-    const top = cursorTopInViewport + lineHeight + 4; // 4px gap below cursor
-    const left = cursorLeftInViewport;
-    
-    document.body.removeChild(div);
-    
-    return { top, left };
-  }, []);
-
-  // Load notes on mount
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
-        const { notes: data } = await fetchNotes();
-        if (!cancelled) setNotes(data);
+        const { notes: data } = await fetchNotes(undefined, 'active');
+        const sorted = [...data].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        if (!cancelled) setNotes(sorted.slice(0, 10));
       } catch (err) {
         console.error('Failed to load notes:', err);
       } finally {
@@ -536,363 +527,77 @@ function NotesCard() {
     return () => { cancelled = true; };
   }, []);
 
-  // Load linked issue details when selected note changes
-  useEffect(() => {
-    if (!selectedNote || !isEditing) {
-      setLinkedIssueDetails([]);
-      return;
-    }
-    const ids = parseJsonArray(selectedNote.issueIds);
-    setLinkedIssueIds(ids);
-    setTaggedUserIds(parseJsonArray(selectedNote.taggedUserIds));
-
-    // Fetch issue details for linked IDs
-    if (ids.length > 0) {
-      (async () => {
-        const results: IssueSearchResult[] = [];
-        for (const id of ids) {
-          try {
-            const { issues } = await searchIssues(id);
-            const match = issues.find(i => i.zohoId === id);
-            if (match) results.push(match);
-          } catch { /* skip */ }
-        }
-        setLinkedIssueDetails(results);
-      })();
-    } else {
-      setLinkedIssueDetails([]);
-    }
-  }, [selectedNote?.id, isEditing]);
-
-  const selectNote = useCallback((note: NoteEntry) => {
-    setSelectedId(note.id);
-    setTitle(note.title);
-    setContent(note.content);
-    setLinkedIssueIds(parseJsonArray(note.issueIds));
-    setTaggedUserIds(parseJsonArray(note.taggedUserIds));
-    setIsEditing(true);
-  }, []);
-
-  // Debounced auto-save
-  const scheduleSave = useCallback((noteId: string, data: { title?: string; content?: string; issueIds?: string[]; taggedUserIds?: string[] }) => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      try {
-        const updated = await updateNote(noteId, data);
-        setNotes(prev => prev.map(n => n.id === updated.id ? updated : n));
-      } catch (err) {
-        console.error('Auto-save failed:', err);
-      }
-    }, 500);
-  }, []);
-
-  const handleTitleChange = useCallback((val: string) => {
-    setTitle(val);
-    if (selectedId) scheduleSave(selectedId, { title: val });
-  }, [selectedId, scheduleSave]);
-
-  const handleContentChange = useCallback((val: string) => {
-    setContent(val);
-    if (selectedId) scheduleSave(selectedId, { content: val });
-
-    // Detect @mention
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    const cursorPos = textarea.selectionStart;
-    const textBefore = val.slice(0, cursorPos);
-    const atMatch = textBefore.match(/@(\w*)$/);
-    if (atMatch) {
-      setMentionOpen(true);
-      setMentionIdx(0);
-      // Calculate cursor position for dropdown placement
-      const coords = calculateCursorCoordinates();
-      setMentionPosition(coords);
-      // Fetch users
-      searchUsers(atMatch[1]).then(({ users }) => {
-        setMentionUsers(users);
-      }).catch(() => setMentionUsers([]));
-    } else {
-      setMentionOpen(false);
-    }
-  }, [selectedId, scheduleSave, calculateCursorCoordinates]);
-
-  const insertMention = useCallback((user: UserSearchResult) => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    const cursorPos = textarea.selectionStart;
-    const textBefore = content.slice(0, cursorPos);
-    const textAfter = content.slice(cursorPos);
-
-    // Replace the @query with @username
-    const atMatch = textBefore.match(/@(\w*)$/);
-    if (!atMatch) return;
-    const beforeAt = textBefore.slice(0, atMatch.index!);
-    const newText = `${beforeAt}@${user.name} ${textAfter}`;
-    setContent(newText);
-
-    // Add user to taggedUserIds
-    const newTagged = [...new Set([...taggedUserIds, user.id])];
-    setTaggedUserIds(newTagged);
-    if (selectedId) scheduleSave(selectedId, { content: newText, taggedUserIds: newTagged });
-
-    setMentionOpen(false);
-    // Restore cursor position after the inserted mention
-    setTimeout(() => {
-      const newPos = beforeAt.length + user.name.length + 2; // @name + space
-      textarea.setSelectionRange(newPos, newPos);
-      textarea.focus();
-    }, 0);
-  }, [content, taggedUserIds, selectedId, scheduleSave]);
-
-  const handleTextareaKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!mentionOpen || mentionUsers.length === 0) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setMentionIdx(prev => (prev + 1) % mentionUsers.length);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setMentionIdx(prev => (prev - 1 + mentionUsers.length) % mentionUsers.length);
-    } else if (e.key === 'Enter' || e.key === 'Tab') {
-      e.preventDefault();
-      insertMention(mentionUsers[mentionIdx]);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      setMentionOpen(false);
-    }
-  }, [mentionOpen, mentionUsers, mentionIdx, insertMention]);
-
-  // Issue search
-  useEffect(() => {
-    if (!issueSearchQuery.trim()) {
-      setIssueSearchResults([]);
-      return;
-    }
-    const timer = setTimeout(async () => {
-      try {
-        const { issues } = await searchIssues(issueSearchQuery);
-        setIssueSearchResults(issues.filter(i => !linkedIssueIds.includes(i.zohoId)));
-      } catch {
-        setIssueSearchResults([]);
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [issueSearchQuery, linkedIssueIds]);
-
-  const addLinkedIssue = useCallback((issue: IssueSearchResult) => {
-    const newIds = [...linkedIssueIds, issue.zohoId];
-    setLinkedIssueIds(newIds);
-    setLinkedIssueDetails(prev => [...prev, issue]);
-    setIssueSearchQuery('');
-    setIssueSearchOpen(false);
-    if (selectedId) scheduleSave(selectedId, { issueIds: newIds });
-  }, [linkedIssueIds, selectedId, scheduleSave]);
-
-  const removeLinkedIssue = useCallback((zohoId: string) => {
-    const newIds = linkedIssueIds.filter(id => id !== zohoId);
-    setLinkedIssueIds(newIds);
-    setLinkedIssueDetails(prev => prev.filter(i => i.zohoId !== zohoId));
-    if (selectedId) scheduleSave(selectedId, { issueIds: newIds });
-  }, [linkedIssueIds, selectedId, scheduleSave]);
-
-  const handleCreateNote = useCallback(async () => {
-    try {
-      const note = await createNote({ userId: 'local' });
-      setNotes(prev => [note, ...prev]);
-      selectNote(note);
-    } catch (err) {
-      console.error('Failed to create note:', err);
-    }
-  }, [selectNote]);
-
   const handleDeleteNote = useCallback(async (noteId: string) => {
     try {
       await deleteNote(noteId);
       setNotes(prev => prev.filter(n => n.id !== noteId));
-      if (selectedId === noteId) {
-        setSelectedId(null);
-        setTitle('');
-        setContent('');
-        setLinkedIssueIds([]);
-        setTaggedUserIds([]);
-        setIsEditing(false);
-      }
     } catch (err) {
       console.error('Failed to delete note:', err);
     }
-  }, [selectedId]);
-
-  const handleCloseEditor = useCallback(() => {
-    setIsEditing(false);
-    setSelectedId(null);
   }, []);
 
-  // List view
-  if (!isEditing) {
-    return (
-      <div style={s.card}>
-        <div style={s.cardHeader}>
-          <h2 style={s.cardTitle}>
-            <FileText size={16} strokeWidth={1.5} color={C.inkSubtle} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-            Notes
-          </h2>
-          <button style={s.addNoteBtn} onClick={handleCreateNote}>
-            <Plus size={12} strokeWidth={1.5} color={C.inkMuted} style={{ verticalAlign: 'middle', marginRight: 4 }} />
-            Add Note
-          </button>
-        </div>
-        <div style={s.cardBody}>
-          {loading ? (
-            <p style={s.placeholder}>Loading notes...</p>
-          ) : notes.length === 0 ? (
-            <p style={s.placeholder}>No notes yet. Create one to get started.</p>
-          ) : (
-            <div style={s.notesList}>
-              {notes.map(note => (
-                <div
-                  key={note.id}
-                  style={s.noteListItem}
-                  onClick={() => selectNote(note)}
-                >
-                  <div style={s.noteListItemTitle}>{note.title || 'Untitled'}</div>
-                  <div style={s.noteListItemPreview}>
-                    {note.content.slice(0, 80) || 'No content'}
-                  </div>
-                  <button
-                    style={s.noteDeleteBtn}
-                    onClick={(e) => { e.stopPropagation(); handleDeleteNote(note.id); }}
-                    title="Delete note"
-                  >
-                    <X size={16} strokeWidth={1.5} color={C.inkTertiary} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
+  const relativeTime = (dateStr: string): string => {
+    const now = Date.now();
+    const then = new Date(dateStr).getTime();
+    const diff = now - then;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `${days}d ago`;
+    const months = Math.floor(days / 30);
+    return `${months}mo ago`;
+  };
 
-  // Editor view
   return (
     <div style={s.card}>
       <div style={s.cardHeader}>
-        <button style={s.backBtn} onClick={handleCloseEditor}>
-          <ArrowLeft size={12} strokeWidth={1.5} color={C.inkSubtle} style={{ verticalAlign: 'middle', marginRight: 4 }} />
-          Back
+        <h2 style={s.cardTitle}>
+          <FileText size={16} strokeWidth={1.5} color={C.inkSubtle} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+          Notes
+        </h2>
+        <button style={s.addNoteBtn} onClick={() => navigate('/notes/new')}>
+          <Plus size={12} strokeWidth={1.5} color="#fff" style={{ verticalAlign: 'middle', marginRight: 4 }} />
+          Add
         </button>
-        <h2 style={s.cardTitle}>Edit Note</h2>
-        {selectedNote && (
-          <button
-            style={s.deleteNoteBtn}
-            onClick={() => handleDeleteNote(selectedNote.id)}
-            title="Delete note"
-          >
-            <Trash2 size={12} strokeWidth={1.5} color={C.danger} style={{ verticalAlign: 'middle', marginRight: 4 }} />
-            Delete
-          </button>
-        )}
       </div>
       <div style={s.cardBody}>
-        {!selectedNote ? (
-          <p style={s.placeholder}>Note not found</p>
+        {loading ? (
+          <p style={s.placeholder}>Loading notes...</p>
+        ) : notes.length === 0 ? (
+          <p style={s.placeholder}>No active notes.</p>
         ) : (
-          <>
-            <input
-              style={s.titleInput}
-              value={title}
-              onChange={e => handleTitleChange(e.target.value)}
-              placeholder="Note title"
-            />
-            <div style={s.textareaWrapper}>
-              <textarea
-                ref={textareaRef}
-                style={s.textarea}
-                value={content}
-                onChange={e => handleContentChange(e.target.value)}
-                onKeyDown={handleTextareaKeyDown}
-                placeholder="Write your note... Use @ to mention users"
-              />
-            </div>
-            {/* @mention dropdown - positioned fixed relative to viewport */}
-            {mentionOpen && mentionUsers.length > 0 && (
-              <div style={{
-                ...s.mentionDropdown,
-                top: mentionPosition.top,
-                left: mentionPosition.left,
-              }}>
-                {mentionUsers.map((user, idx) => (
-                  <div
-                    key={user.id}
-                    style={{
-                      ...s.mentionItem,
-                      backgroundColor: idx === mentionIdx ? C.hairline : 'transparent',
-                    }}
-                    onClick={() => insertMention(user)}
-                  >
-                    {user.name}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Linked issues */}
-            <div style={s.linkedIssuesSection}>
-              <div style={s.linkedIssuesHeader}>
-                <span style={s.linkedIssuesLabel}>Linked Issues:</span>
+          <div style={s.notesList}>
+            {notes.map(note => (
+              <div
+                key={note.id}
+                style={s.noteListItem}
+                onClick={() => navigate(`/notes/${note.id}`)}
+              >
+                <div style={s.noteListItemTitle}>{note.title || 'Untitled'}</div>
+                <div style={s.noteListItemPreview}>
+                  {stripMarkdown(note.content).slice(0, 80) || 'No content'}
+                </div>
+                <div style={s.noteListItemMeta}>
+                  <span style={s.noteListItemTime}>{relativeTime(note.updatedAt)}</span>
+                </div>
                 <button
-                  style={s.addIssueBtn}
-                  onClick={() => setIssueSearchOpen(!issueSearchOpen)}
+                  style={s.noteDeleteBtn}
+                  onClick={(e) => { e.stopPropagation(); handleDeleteNote(note.id); }}
+                  title="Delete note"
                 >
-                  + Add
+                  <X size={16} strokeWidth={1.5} color={C.inkTertiary} />
                 </button>
               </div>
-
-              {/* Issue chips */}
-              {linkedIssueDetails.length > 0 && (
-                <div style={s.issueChips}>
-                  {linkedIssueDetails.map(issue => (
-                    <span key={issue.zohoId} style={s.issueChip}>
-                      #{issue.itemNo}
-                      <button
-                        style={s.chipRemove}
-                        onClick={() => removeLinkedIssue(issue.zohoId)}
-                      >
-                        <X size={12} strokeWidth={1.5} color={C.inkTertiary} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {/* Issue search */}
-              {issueSearchOpen && (
-                <div style={s.issueSearchContainer}>
-                  <input
-                    style={s.issueSearchInput}
-                    value={issueSearchQuery}
-                    onChange={e => setIssueSearchQuery(e.target.value)}
-                    placeholder="Search issues by title..."
-                    autoFocus
-                  />
-                  {issueSearchResults.length > 0 && (
-                    <div style={s.issueSearchDropdown}>
-                      {issueSearchResults.map(issue => (
-                        <div
-                          key={issue.zohoId}
-                          style={s.issueSearchItem}
-                          onClick={() => addLinkedIssue(issue)}
-                        >
-                          <span style={s.issueSearchItemNo}>#{issue.itemNo}</span>
-                          <span style={s.issueSearchTitle}>{issue.title}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+            ))}
+            <div style={s.cardFooter}>
+              <button style={s.viewAllBtn} onClick={() => navigate('/notes')}>
+                View All <ArrowRight size={12} strokeWidth={1.5} style={{ marginLeft: 4 }} />
+              </button>
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>
@@ -933,7 +638,6 @@ const s: Record<string, React.CSSProperties> = {
     fontFamily: font.text,
   },
 
-  // ── Card layout ──────────────────────────────────────────────────────────
   card: {
     backgroundColor: C.surface1,
     border: `1px solid ${C.hairline}`,
@@ -981,7 +685,69 @@ const s: Record<string, React.CSSProperties> = {
     minHeight: 120,
   },
 
-  // ── Watchlist card ──────────────────────────────────────────────────────────
+  deadlinesList: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+  },
+  deadlineItem: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '12px 20px',
+    borderBottom: `1px solid ${C.hairline}`,
+    cursor: 'pointer',
+    transition: 'background-color 0.1s',
+  },
+  deadlineItemOverdue: {
+    borderLeft: `3px solid ${C.danger}`,
+    backgroundColor: `${C.danger}08`,
+  },
+  deadlineItemLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    minWidth: 0,
+  },
+  deadlineAlert: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 18,
+    height: 18,
+    borderRadius: R.pill,
+    backgroundColor: C.danger,
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 700,
+    flexShrink: 0,
+  },
+  deadlineTitle: {
+    fontSize: 13,
+    fontWeight: 500,
+    color: C.inkMuted,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+  },
+  deadlineSource: {
+    fontSize: 10,
+    fontWeight: 600,
+    color: C.inkTertiary,
+    backgroundColor: C.surface2,
+    padding: '2px 6px',
+    borderRadius: R.sm,
+    flexShrink: 0,
+    textTransform: 'uppercase' as const,
+  },
+  deadlineDue: {
+    fontSize: 12,
+    color: C.inkSubtle,
+    flexShrink: 0,
+    marginLeft: 12,
+    fontFamily: font.text,
+  },
+
   boardGroup: {
     borderBottom: `1px solid ${C.hairline}`,
   },
@@ -1020,34 +786,11 @@ const s: Record<string, React.CSSProperties> = {
   compactColUser: { width: 80, justifyContent: 'center' as const },
   compactColAge: { width: 50, justifyContent: 'flex-end' as const },
 
-  // ── Notes card ──────────────────────────────────────────────────────────
   addNoteBtn: {
     padding: '6px 12px',
     backgroundColor: C.primary,
-    color: C.inkMuted,
+    color: '#fff',
     border: 'none',
-    borderRadius: R.sm,
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: font.text,
-  },
-  backBtn: {
-    padding: '6px 12px',
-    backgroundColor: 'transparent',
-    color: C.inkSubtle,
-    border: `1px solid ${C.hairline}`,
-    borderRadius: R.sm,
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: font.text,
-  },
-  deleteNoteBtn: {
-    padding: '6px 12px',
-    backgroundColor: 'transparent',
-    color: C.danger,
-    border: `1px solid ${C.danger}`,
     borderRadius: R.sm,
     fontSize: 12,
     fontWeight: 600,
@@ -1084,6 +827,15 @@ const s: Record<string, React.CSSProperties> = {
     whiteSpace: 'nowrap' as const,
     fontFamily: font.text,
   },
+  noteListItemMeta: {
+    display: 'flex',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  noteListItemTime: {
+    fontSize: 11,
+    color: C.inkTertiary,
+  },
   noteDeleteBtn: {
     position: 'absolute' as const,
     top: 12,
@@ -1096,163 +848,24 @@ const s: Record<string, React.CSSProperties> = {
     padding: '0 4px',
     lineHeight: 1,
   },
-  titleInput: {
-    backgroundColor: 'transparent',
-    border: 'none',
-    borderBottom: `1px solid ${C.hairline}`,
-    color: C.inkMuted,
-    fontSize: 18,
-    fontWeight: 600,
-    padding: '8px 0',
-    outline: 'none',
-    fontFamily: font.text,
-    marginBottom: 12,
-  },
-  textareaWrapper: {
-    position: 'relative' as const,
-    flex: 1,
-    marginBottom: 12,
-  },
-  textarea: {
-    width: '100%',
-    minHeight: 200,
-    backgroundColor: 'transparent',
-    border: `1px solid ${C.hairline}`,
-    borderRadius: R.sm,
-    color: C.inkMuted,
-    fontSize: 14,
-    padding: 12,
-    outline: 'none',
-    resize: 'vertical' as const,
-    fontFamily: font.text,
-    lineHeight: 1.5,
-    boxSizing: 'border-box' as const,
-  },
-  mentionDropdown: {
-    position: 'fixed' as const,
-    backgroundColor: C.surface1,
-    border: `1px solid ${C.hairline}`,
-    borderRadius: R.sm,
-    maxHeight: 200,
-    overflowY: 'auto' as const,
-    zIndex: 1000,
-    minWidth: 200,
-    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-  },
-  mentionItem: {
-    padding: '8px 12px',
-    fontSize: 13,
-    color: C.inkMuted,
-    cursor: 'pointer',
-    fontFamily: font.text,
-  },
-  linkedIssuesSection: {
-    borderTop: `1px solid ${C.hairline}`,
-    paddingTop: 12,
-    marginTop: 12,
-  },
-  linkedIssuesHeader: {
+  cardFooter: {
+    padding: '12px 20px',
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
+    justifyContent: 'flex-start',
   },
-  linkedIssuesLabel: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: C.inkSubtle,
-    fontFamily: font.text,
-  },
-  addIssueBtn: {
-    backgroundColor: 'transparent',
-    border: `1px solid ${C.hairline}`,
-    color: C.primary,
-    fontSize: 12,
-    fontWeight: 600,
-    padding: '4px 8px',
-    borderRadius: R.sm,
-    cursor: 'pointer',
-    fontFamily: font.text,
-  },
-  issueChips: {
-    display: 'flex',
-    flexWrap: 'wrap' as const,
-    gap: 6,
-    marginBottom: 8,
-  },
-  issueChip: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: C.surface2,
-    border: `1px solid ${C.hairline}`,
-    borderRadius: R.sm,
-    padding: '3px 8px',
-    fontSize: 12,
-    color: C.inkMuted,
-    fontFamily: font.text,
-  },
-  chipRemove: {
+  viewAllBtn: {
     background: 'none',
     border: 'none',
-    color: C.inkTertiary,
-    fontSize: 14,
+    color: C.primary,
+    fontSize: 13,
+    fontWeight: 600,
     cursor: 'pointer',
     padding: 0,
-    lineHeight: 1,
-  },
-  issueSearchContainer: {
-    position: 'relative' as const,
-    marginTop: 8,
-  },
-  issueSearchInput: {
-    width: '100%',
-    backgroundColor: C.canvas,
-    border: `1px solid ${C.hairline}`,
-    borderRadius: R.sm,
-    color: C.inkMuted,
-    fontSize: 13,
-    padding: '8px 12px',
-    outline: 'none',
     fontFamily: font.text,
-    boxSizing: 'border-box' as const,
-  },
-  issueSearchDropdown: {
-    position: 'absolute' as const,
-    top: '100%',
-    left: 0,
-    right: 0,
-    backgroundColor: C.surface1,
-    border: `1px solid ${C.hairline}`,
-    borderRadius: R.sm,
-    maxHeight: 200,
-    overflowY: 'auto' as const,
-    zIndex: 10,
-  },
-  issueSearchItem: {
-    padding: '8px 12px',
-    cursor: 'pointer',
     display: 'flex',
-    gap: 8,
     alignItems: 'center',
   },
-  issueSearchItemNo: {
-    fontSize: 12,
-    fontWeight: 600,
-    color: C.primary,
-    flexShrink: 0,
-    fontFamily: font.mono,
-  },
-  issueSearchTitle: {
-    fontSize: 12,
-    color: C.inkMuted,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap' as const,
-    fontFamily: font.text,
-  },
 
-  // ── Notifications ───────────────────────────────────────────────────────────
   headerTop: {
     display: 'flex',
     alignItems: 'center',

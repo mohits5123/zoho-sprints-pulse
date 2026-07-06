@@ -105,14 +105,17 @@ model Watchlist {
 }
 
 model Note {
-  id               String   @id @default(uuid())
-  userId           String                       // owner of the note
-  title            String   @default("Untitled")
-  content          String   @default("")        // plain text, supports @mentions
-  issueIds         String                       // JSON string of issue zohoIds: '["zohoId1","zohoId2"]'
-  taggedUserIds    String                       // JSON string of user zohoIds mentioned: '["zohoId1","zohoId2"]'
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id               String     @id @default(uuid())
+  userId           String                         // owner of the note
+  title            String     @default("Untitled")
+  content          String     @default("")        // full Markdown, no size limit
+  issueIds         String                         // JSON string of issue zohoIds: '["zohoId1","zohoId2"]'
+  taggedUserIds    String                         // JSON string of user zohoIds mentioned: '["zohoId1","zohoId2"]'
+  state            String     @default("active")  // "active" or "closed"
+  deadline         DateTime?                      // optional deadline for this note
+  deadlineNotified Boolean    @default(false)     // whether 1-day-before notification was sent
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
 }
 
 model Deadline {
@@ -130,10 +133,12 @@ model Deadline {
 model ActivityNotification {
   id        String   @id @default(uuid())
   userId    String
-  issueId   String                       // issue zohoId that changed
-  boardId   String                       // project zohoId
-  oldStatus String
-  newStatus String
+  type      String   @default("status_change")  // "status_change" | "deadline_reminder" | "deadline_day_of" | "deadline_overdue"
+  issueId   String   @default("")                // issue zohoId (empty for note deadlines)
+  boardId   String   @default("")                // project zohoId (empty for note deadlines)
+  noteId    String?                              // note UUID if related to a note deadline
+  oldStatus String   @default("")
+  newStatus String   @default("")
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
 

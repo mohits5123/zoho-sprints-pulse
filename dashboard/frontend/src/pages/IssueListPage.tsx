@@ -116,6 +116,7 @@ export function IssueListPage() {
       {!loading && issues.length > 0 && (
         <div style={s.list}>
           <div style={s.colHeader}>
+            <span style={{ width: 32 }}></span>
             <span style={{ ...s.col, ...s.colId, ...s.colHeaderText }}>ID</span>
             <span style={{ ...s.col, flex: 1, ...s.colHeaderText }}>Title</span>
             <span style={{ ...s.col, ...s.colStatus, ...s.colHeaderText }}>Status</span>

@@ -57,7 +57,7 @@ import prisma from '../db/client';
 import { recordBurndownSnapshot } from './burndownSnapshots';
 import { zohoThrottle } from './rateLimiter';
 import { startSync, completeSync, touchLastSyncedAt } from './syncStatus';
-import { checkWatchedIssueStatusChanges } from './activitySync';
+import { checkWatchedIssueStatusChanges, checkNoteDeadlineNotifications } from './activitySync';
 
 
 const SETTINGS_KEY_TEAM_ID = 'zoho_team_id';
@@ -1623,5 +1623,7 @@ export async function runFullSync(): Promise<number> {
   await completeSync(zohoThrottle.sent);
   // Check for status changes in watched issues and create notifications
   await checkWatchedIssueStatusChanges();
+  // Check for note deadline notifications
+  await checkNoteDeadlineNotifications();
   return synced;
 }

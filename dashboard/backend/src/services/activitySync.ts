@@ -123,6 +123,100 @@ export async function checkWatchedIssueStatusChanges(): Promise<number> {
 }
 
 /**
+ * Check for note deadline notifications and create alerts.
+ *
+ * This function should be called after each sync completes. It:
+ * 1. Fetches all notes with deadlines that are active
+ * 2. For each note, checks if deadline is within 24 hours or today
+ * 3. Creates ActivityNotification records for upcoming/overdue deadlines
+ * 4. Updates the deadlineNotified flag to prevent duplicate notifications
+ *
+ * @returns Number of notifications created
+ */
+export async function checkNoteDeadlineNotifications(): Promise<number> {
+  return prisma.$transaction(async (tx) => {
+    const now = new Date();
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+
+    const notesWithDeadlines = await tx.note.findMany({
+      where: {
+        deadline: { not: null },
+        state: 'active',
+      },
+    });
+
+    if (notesWithDeadlines.length === 0) return 0;
+
+    const notifications: Array<{
+      userId: string;
+      type: string;
+      issueId: string;
+      boardId: string;
+      noteId: string;
+      oldStatus: string;
+      newStatus: string;
+    }> = [];
+
+    for (const note of notesWithDeadlines) {
+      if (!note.deadline) continue;
+
+      const deadline = new Date(note.deadline);
+
+      if (deadline >= now && deadline <= tomorrow && !note.deadlineNotified) {
+        const issueIds = JSON.parse(note.issueIds || '[]') as string[];
+        notifications.push({
+          userId: note.userId,
+          type: 'deadline_reminder',
+          issueId: issueIds[0] || '',
+          boardId: '',
+          noteId: note.id,
+          oldStatus: 'deadline_reminder',
+          newStatus: note.state,
+        });
+
+        await tx.note.update({
+          where: { id: note.id },
+          data: { deadlineNotified: true },
+        });
+      }
+
+      if (deadline >= startOfToday && deadline < endOfToday) {
+        const existingDayOf = await tx.activityNotification.findFirst({
+          where: {
+            userId: note.userId,
+            noteId: note.id,
+            type: 'deadline_day_of',
+          },
+        });
+
+        if (!existingDayOf) {
+          const issueIds = JSON.parse(note.issueIds || '[]') as string[];
+          notifications.push({
+            userId: note.userId,
+            type: 'deadline_day_of',
+            issueId: issueIds[0] || '',
+            boardId: '',
+            noteId: note.id,
+            oldStatus: 'deadline_day_of',
+            newStatus: note.state,
+          });
+        }
+      }
+    }
+
+    if (notifications.length > 0) {
+      await tx.activityNotification.createMany({
+        data: notifications,
+      });
+    }
+
+    return notifications.length;
+  });
+}
+
+/**
  * Initialize the watched statuses snapshot with current statuses.
  *
  * This should be called once on first sync or when the snapshot is missing.

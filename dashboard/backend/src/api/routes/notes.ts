@@ -1,29 +1,14 @@
-/**
- * Notes API — manage notes with @mentions and linked issues.
- *
- * Endpoints for CRUD operations on notes, plus search helpers
- * for user mentions and issue linking.
- * All data is stored locally in SQLite — no Zoho API calls.
- */
-
 import { Router } from 'express';
 import prisma from '../../db/client';
 
 const router = Router();
 
-/**
- * GET /api/notes — List all notes for a user.
- * @route GET /api/notes?userId=<id>
- * @method GET
- * @query userId (optional) - User zohoId to filter by
- * @returns {Object} - { notes: Note[], total: number }
- * @auth Required (OAuth token validation)
- */
 router.get('/', async (req, res) => {
   try {
-    const { userId } = req.query;
-    const where: Record<string, string> = {};
+    const { userId, state } = req.query;
+    const where: Record<string, unknown> = {};
     if (userId) where.userId = String(userId);
+    if (state) where.state = String(state);
 
     const notes = await prisma.note.findMany({
       where: Object.keys(where).length > 0 ? where : undefined,
@@ -37,22 +22,16 @@ router.get('/', async (req, res) => {
   }
 });
 
-/**
- * POST /api/notes — Create a new note.
- * @route POST /api/notes
- * @method POST
- * @body {Object} body: { userId: string; title?: string; content?: string; issueIds?: string[]; taggedUserIds?: string[] }
- * @returns {Object} - Created note
- * @auth Required (OAuth token validation)
- */
 router.post('/', async (req, res) => {
   try {
-    const { userId, title, content, issueIds, taggedUserIds } = req.body as {
+    const { userId, title, content, issueIds, taggedUserIds, state, deadline } = req.body as {
       userId: string;
       title?: string;
       content?: string;
       issueIds?: string[];
       taggedUserIds?: string[];
+      state?: string;
+      deadline?: string | null;
     };
 
     if (!userId) {
@@ -67,6 +46,8 @@ router.post('/', async (req, res) => {
         content: content ?? '',
         issueIds: JSON.stringify(issueIds ?? []),
         taggedUserIds: JSON.stringify(taggedUserIds ?? []),
+        state: state ?? 'active',
+        deadline: deadline ? new Date(deadline) : null,
       },
     });
     res.json({ note });
@@ -77,30 +58,27 @@ router.post('/', async (req, res) => {
   }
 });
 
-/**
- * PATCH /api/notes/:noteId — Update a note.
- * @route PATCH /api/notes/:noteId
- * @method PATCH
- * @params {string} noteId - Note UUID
- * @body {Object} body: { title?: string; content?: string; issueIds?: string[]; taggedUserIds?: string[] }
- * @returns {Object} - Updated note
- * @auth Required (OAuth token validation)
- */
 router.patch('/:noteId', async (req, res) => {
   try {
     const { noteId } = req.params;
-    const { title, content, issueIds, taggedUserIds } = req.body as {
+    const { title, content, issueIds, taggedUserIds, state, deadline, deadlineNotified } = req.body as {
       title?: string;
       content?: string;
       issueIds?: string[];
       taggedUserIds?: string[];
+      state?: string;
+      deadline?: string | null;
+      deadlineNotified?: boolean;
     };
 
-    const data: Record<string, string> = {};
+    const data: Record<string, unknown> = {};
     if (title !== undefined) data.title = title;
     if (content !== undefined) data.content = content;
     if (issueIds !== undefined) data.issueIds = JSON.stringify(issueIds);
     if (taggedUserIds !== undefined) data.taggedUserIds = JSON.stringify(taggedUserIds);
+    if (state !== undefined) data.state = state;
+    if (deadline !== undefined) data.deadline = deadline ? new Date(deadline) : null;
+    if (deadlineNotified !== undefined) data.deadlineNotified = deadlineNotified;
 
     if (Object.keys(data).length === 0) {
       res.status(400).json({ error: 'No fields to update' });
@@ -116,14 +94,6 @@ router.patch('/:noteId', async (req, res) => {
   }
 });
 
-/**
- * DELETE /api/notes/:noteId — Delete a note.
- * @route DELETE /api/notes/:noteId
- * @method DELETE
- * @params {string} noteId - Note UUID
- * @returns {Object} - { deleted: boolean }
- * @auth Required (OAuth token validation)
- */
 router.delete('/:noteId', async (req, res) => {
   try {
     const { noteId } = req.params;
@@ -136,14 +106,33 @@ router.delete('/:noteId', async (req, res) => {
   }
 });
 
-/**
- * GET /api/notes/search-users — Search users by name for @mentions.
- * @route GET /api/notes/search-users?q=<query>
- * @method GET
- * @query q - Search query (partial name match, case-insensitive)
- * @returns {Object} - { users: Array<{ id: string; name: string }> }
- * @auth Required (OAuth token validation)
- */
+router.get('/with-deadlines', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    const where: Record<string, unknown> = {
+      deadline: { not: null },
+    };
+    if (userId) where.userId = String(userId);
+
+    const notes = await prisma.note.findMany({
+      where,
+      orderBy: { deadline: 'asc' },
+    });
+
+    const now = new Date();
+    const result = notes.map(note => ({
+      ...note,
+      isOverdue: note.deadline !== null && new Date(note.deadline) < now && note.state === 'active',
+    }));
+
+    res.json({ notes: result });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('Notes with deadlines failed:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.get('/search-users', async (req, res) => {
   try {
     const q = String(req.query.q ?? '').trim();
@@ -168,15 +157,6 @@ router.get('/search-users', async (req, res) => {
   }
 });
 
-/**
- * GET /api/notes/search-issues — Search issues by title for linking.
- * @route GET /api/notes/search-issues?q=<query>&boardId=<id>
- * @method GET
- * @query q - Search query (partial title match, case-insensitive)
- * @query boardId (optional) - Project zohoId to scope the search
- * @returns {Object} - { issues: Array<{ zohoId: string; itemNo: string; title: string }> }
- * @auth Required (OAuth token validation)
- */
 router.get('/search-issues', async (req, res) => {
   try {
     const q = String(req.query.q ?? '').trim();
