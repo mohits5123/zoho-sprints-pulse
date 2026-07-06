@@ -1,32 +1,12 @@
-/**
- * Home/Dashboard page component.
- *
- * Landing page showing connection status, a unified sync control, and quick
- * navigation to main sections:
- * - Team: View all team members (synced from Zoho)
- * - Projects: View all projects (synced from Zoho)
- * - Sprints: View active sprint status (synced from Zoho)
- * - Zoho Connection: Display connection details and token expiry
- *
- * Features:
- * - Single "Sync All" button in the header that syncs team, projects, and sprints
- * - 3-column card grid for Team, Projects, and Sprints (counts only, no per-card sync)
- * - Clickable cards navigate to respective pages (when data synced)
- * - Zoho connection details card at bottom
- * - Connection status badge in header
- *
- * Data flows:
- * - Status (Zoho connection) fetched on mount
- * - User/project/sprint counts fetched from local SQLite
- * - Sync operations are fire-and-forget (background on server)
- * - Counts refresh automatically when syncActive transitions false (sync done)
- */
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Users, FolderKanban, Timer, Bell, CheckCircle, Zap } from 'lucide-react';
 import { fetchStatus, fetchUsers, syncUsers, fetchProjects, syncProjects, fetchSprints, syncSprints, fetchActivitySummary, StatusResponse, ActivitySummary } from '../api/client';
 import { StatusBadge } from '../components/StatusBadge';
 import { SyncButton } from '../components/SyncButton';
+import { DashboardCard } from '../components/DashboardCard';
 import { useSyncProgress } from '../contexts/SyncProgressContext';
+import { C, R, font } from '../theme';
 
 export function Home() {
   const navigate = useNavigate();
@@ -41,7 +21,6 @@ export function Home() {
   const [activity, setActivity]           = useState<ActivitySummary | null>(null);
   const [syncError, setSyncError]         = useState<string | null>(null);
 
-  // On mount: fetch Zoho connection status and current counts from local SQLite.
   useEffect(() => {
     fetchStatus()
       .then(setStatus)
@@ -54,7 +33,6 @@ export function Home() {
     fetchActivitySummary().then(setActivity).catch(() => {});
   }, []);
 
-  // Refresh counts when a sync cycle completes (syncActive transitions true → false).
   const wasSyncActive = useRef(false);
   useEffect(() => {
     if (wasSyncActive.current && !syncActive) {
@@ -66,21 +44,6 @@ export function Home() {
     wasSyncActive.current = syncActive;
   }, [syncActive]);
 
-  /**
-   * Trigger a full sync of all data (users, projects, sprints) from Zoho.
-   *
-   * All three sync calls are fired in parallel:
-   * - Users sync is synchronous on the backend; the user count is updated from
-   *   the response immediately.
-   * - Projects and sprints syncs run asynchronously on the backend; their counts
-   *   are refreshed when syncActive transitions back to false (detected in the
-   *   useEffect above).
-   *
-   * `setSyncActive(false)` is called automatically by SyncProgressBar when the
-   * backend reports inProgress=false after a background sync. The 10-second safety
-   * timeout in SyncProgressBar handles the case where neither projects nor sprints
-   * ever call `startSync` on the backend.
-   */
   async function handleSyncAll() {
     setSyncError(null);
     setSyncActive(true);
@@ -98,8 +61,6 @@ export function Home() {
     if (errors.length > 0) {
       setSyncError(errors.map((r) => r.reason?.message ?? 'Sync failed').join(' · '));
     }
-    // Note: setSyncActive(false) is handled by SyncProgressBar on background-sync
-    // completion. For the users-only case the 10s safety timeout takes over.
   }
 
   const portal         = status?.portals?.[0];
@@ -124,21 +85,17 @@ export function Home() {
       {syncError && <p style={s.errorText}>{syncError}</p>}
 
       <main style={s.main}>
-
-        {/* ── Primary sync cards — 3-col grid ─────────────────────────── */}
         <div style={s.grid}>
-
-          {/* Team card */}
-          <div
-            style={{ ...s.card, cursor: usersSynced ? 'pointer' : 'default', borderColor: usersSynced ? '#3b82f644' : '#334155' }}
+          <DashboardCard
+            title="Team"
+            subtitle={usersSynced ? 'Click to view all members' : undefined}
+            count={usersSynced ? userCount : undefined}
+            countLabel={usersSynced ? 'members synced' : undefined}
+            countColor={C.primary}
+            accentColor={usersSynced ? C.primary : undefined}
+            icon={<Users size={20} strokeWidth={1.5} color={C.primary} />}
             onClick={usersSynced ? () => navigate('/users') : undefined}
           >
-            <div style={s.cardHeader}>
-              <div>
-                <h2 style={s.cardTitle}>Team</h2>
-                {usersSynced && <p style={s.cardHint}>Click to view all members</p>}
-              </div>
-            </div>
             {userCount === null && <p style={s.muted}>Checking local database…</p>}
             {userCount === 0 && (
               <>
@@ -146,25 +103,18 @@ export function Home() {
                 <p style={s.muted}>Use the Sync All button above to get started.</p>
               </>
             )}
-            {usersSynced && (
-              <div style={s.countRow}>
-                <span style={s.count}>{userCount}</span>
-                <span style={s.countLabel}>members synced</span>
-              </div>
-            )}
-          </div>
+          </DashboardCard>
 
-          {/* Projects card */}
-          <div
-            style={{ ...s.card, cursor: projSynced ? 'pointer' : 'default', borderColor: projSynced ? '#8b5cf644' : '#334155' }}
+          <DashboardCard
+            title="Projects"
+            subtitle={projSynced ? 'Click to view all projects' : undefined}
+            count={projSynced ? projectCount : undefined}
+            countLabel={projSynced ? 'projects synced' : undefined}
+            countColor="#a855f7"
+            accentColor={projSynced ? '#a855f7' : undefined}
+            icon={<FolderKanban size={20} strokeWidth={1.5} color="#a855f7" />}
             onClick={projSynced ? () => navigate('/projects') : undefined}
           >
-            <div style={s.cardHeader}>
-              <div>
-                <h2 style={s.cardTitle}>Projects</h2>
-                {projSynced && <p style={s.cardHint}>Click to view all projects</p>}
-              </div>
-            </div>
             {projectCount === null && <p style={s.muted}>Checking local database…</p>}
             {projectCount === 0 && (
               <>
@@ -172,25 +122,18 @@ export function Home() {
                 <p style={s.muted}>Use the Sync All button above to get started.</p>
               </>
             )}
-            {projSynced && (
-              <div style={s.countRow}>
-                <span style={{ ...s.count, color: '#8b5cf6' }}>{projectCount}</span>
-                <span style={s.countLabel}>projects synced</span>
-              </div>
-            )}
-          </div>
+          </DashboardCard>
 
-          {/* Sprint Health card */}
-          <div
-            style={{ ...s.card, cursor: sprintsSynced ? 'pointer' : 'default', borderColor: sprintsSynced ? '#22c55e44' : '#334155' }}
+          <DashboardCard
+            title="Sprints"
+            subtitle={sprintsSynced ? 'Click to view all sprints' : undefined}
+            count={sprintsSynced ? sprintCount : undefined}
+            countLabel={sprintsSynced ? 'sprints synced' : undefined}
+            countColor={C.success}
+            accentColor={sprintsSynced ? C.success : undefined}
+            icon={<Timer size={20} strokeWidth={1.5} color={C.success} />}
             onClick={sprintsSynced ? () => navigate('/sprints') : undefined}
           >
-            <div style={s.cardHeader}>
-              <div>
-                <h2 style={s.cardTitle}>Sprints</h2>
-                {sprintsSynced && <p style={s.cardHint}>Click to view all sprints</p>}
-              </div>
-            </div>
             {sprintCount === null && <p style={s.muted}>Checking local database…</p>}
             {sprintCount === 0 && (
               <>
@@ -198,25 +141,15 @@ export function Home() {
                 <p style={s.muted}>Sync projects first, then set board types.</p>
               </>
             )}
-            {sprintsSynced && (
-              <div style={s.countRow}>
-                <span style={{ ...s.count, color: '#22c55e' }}>{sprintCount}</span>
-                <span style={s.countLabel}>sprints synced</span>
-              </div>
-            )}
-          </div>
+          </DashboardCard>
 
-          {/* Activity card */}
-          <div
-            style={{ ...s.card, cursor: 'pointer', borderColor: '#f59e0b44' }}
+          <DashboardCard
+            title="Activity"
+            subtitle="Watchlist, notes & deadlines"
+            accentColor="#f59e0b"
+            icon={<Bell size={20} strokeWidth={1.5} color="#f59e0b" />}
             onClick={() => navigate('/activity')}
           >
-            <div style={s.cardHeader}>
-              <div>
-                <h2 style={s.cardTitle}>Activity</h2>
-                <p style={s.cardHint}>Watchlist, notes & deadlines</p>
-              </div>
-            </div>
             {activity === null && <p style={s.muted}>Loading…</p>}
             {activity !== null && (
               <div style={s.countRow}>
@@ -227,7 +160,7 @@ export function Home() {
                   </>
                 ) : (
                   <>
-                    <span style={{ ...s.count, color: '#22c55e', fontSize: 24 }}>✓</span>
+                    <CheckCircle size={24} strokeWidth={1.5} color={C.success} />
                     <span style={s.countLabel}>all caught up</span>
                   </>
                 )}
@@ -238,13 +171,14 @@ export function Home() {
                 {activity.upcomingDeadlines} upcoming deadline{activity.upcomingDeadlines !== 1 ? 's' : ''}
               </p>
             )}
-          </div>
-
+          </DashboardCard>
         </div>
 
-        {/* ── Zoho connection card (bottom) ────────────────────────────── */}
         <div style={s.card}>
-          <h2 style={s.cardTitle}>Zoho Connection</h2>
+          <h2 style={s.cardTitle}>
+            <Zap size={16} strokeWidth={1.5} color={C.primary} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+            Zoho Connection
+          </h2>
           {statusLoading && <p style={s.muted}>Checking connection…</p>}
           {!statusLoading && status?.connected && (
             <>
@@ -262,19 +196,17 @@ export function Home() {
             </>
           )}
         </div>
-
       </main>
     </div>
   );
 }
 
-// ── Inline styles ────────────────────────────────────────────────────────────
 const s: Record<string, React.CSSProperties> = {
   page: {
     minHeight: '100vh',
-    backgroundColor: '#0f172a',
-    color: '#e2e8f0',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    backgroundColor: C.canvas,
+    color: C.inkMuted,
+    fontFamily: font.text,
     padding: '0 24px 48px',
   },
   header: {
@@ -282,32 +214,30 @@ const s: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '32px 0 40px',
-    borderBottom: '1px solid #1e293b',
+    borderBottom: `1px solid ${C.hairline}`,
     marginBottom: 32,
   },
   headerRight: { display: 'flex', alignItems: 'center', gap: 16 },
-  title:    { margin: 0, fontSize: 28, fontWeight: 700, color: '#f1f5f9' },
-  subtitle: { margin: '4px 0 0', fontSize: 14, color: '#64748b' },
+  title:    { margin: 0, fontSize: 28, fontWeight: 600, color: C.inkMuted, fontFamily: font.display, letterSpacing: '-0.6px' },
+  subtitle: { margin: '4px 0 0', fontSize: 14, color: C.inkTertiary, fontFamily: font.text },
   main: { maxWidth: 960, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 },
   card: {
-    backgroundColor: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: 12,
+    backgroundColor: C.surface1,
+    border: `1px solid ${C.hairline}`,
+    borderRadius: R.lg,
     padding: '24px 28px',
   },
-  cardHeader: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 },
-  cardTitle: { margin: 0, fontSize: 16, fontWeight: 600, color: '#f1f5f9' },
-  cardHint:  { margin: '4px 0 0', fontSize: 12, color: '#64748b' },
+  cardTitle: { margin: 0, fontSize: 16, fontWeight: 600, color: C.inkMuted, fontFamily: font.display },
   countRow:  { display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 },
-  count:     { fontSize: 32, fontWeight: 700, color: '#3b82f6', lineHeight: 1 },
-  countLabel:{ fontSize: 14, color: '#94a3b8' },
-  syncPrompt:{ fontSize: 15, color: '#e2e8f0', margin: '0 0 6px' },
-  deadlineHint: { fontSize: 13, color: '#f59e0b', margin: '8px 0 0' },
-  row:   { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #0f172a' },
-  label: { fontSize: 14, color: '#94a3b8' },
-  value: { fontSize: 14, color: '#e2e8f0', fontWeight: 500 },
-  muted: { color: '#64748b', fontSize: 14, margin: 0 },
-  errorText: { color: '#fca5a5', fontSize: 14, margin: '0 0 8px' },
-  code: { backgroundColor: '#0f172a', padding: '2px 6px', borderRadius: 4, fontSize: 13, color: '#7dd3fc' },
+  count:     { fontSize: 32, fontWeight: 700, lineHeight: 1, fontFamily: font.display, letterSpacing: '-0.6px' },
+  countLabel:{ fontSize: 14, color: C.inkSubtle, fontFamily: font.text },
+  syncPrompt:{ fontSize: 15, color: C.inkMuted, margin: '0 0 6px', fontFamily: font.text },
+  deadlineHint: { fontSize: 13, color: '#f59e0b', margin: '8px 0 0', fontFamily: font.text },
+  row:   { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px solid ${C.hairline}` },
+  label: { fontSize: 14, color: C.inkSubtle, fontFamily: font.text },
+  value: { fontSize: 14, color: C.inkMuted, fontWeight: 500, fontFamily: font.text },
+  muted: { color: C.inkTertiary, fontSize: 14, margin: 0, fontFamily: font.text },
+  errorText: { color: '#ef4444', fontSize: 14, margin: '0 0 8px', fontFamily: font.text },
+  code: { backgroundColor: C.surface2, padding: '2px 6px', borderRadius: R.xs, fontSize: 13, color: C.primaryHover, fontFamily: font.mono },
 };
