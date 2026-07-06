@@ -199,10 +199,15 @@ function WatchlistTab() {
     if (watchlist.length === 0) return;
 
     const fetchDetails = async () => {
+      const results = await Promise.all(
+        watchlist.map(async (entry) => {
+          const issue = await fetchIssueById(entry.issueId);
+          return { issueId: entry.issueId, issue };
+        })
+      );
       const details = new Map<string, IssueItem>();
-      for (const entry of watchlist) {
-        const issue = await fetchIssueById(entry.issueId);
-        if (issue) details.set(entry.issueId, issue);
+      for (const { issueId, issue } of results) {
+        if (issue) details.set(issueId, issue);
       }
       setIssues(details);
     };
@@ -216,17 +221,20 @@ function WatchlistTab() {
 
     const fetchProjectNumbers = async () => {
       const uniqueBoardIds = Array.from(new Set(watchlist.map(w => w.boardId)));
-      const projNoMap = new Map<string, string>();
-      
-      for (const boardId of uniqueBoardIds) {
-        try {
-          const { project } = await fetchProject(boardId);
-          if (project.projNo) {
-            projNoMap.set(boardId, project.projNo);
+      const results = await Promise.all(
+        uniqueBoardIds.map(async (boardId) => {
+          try {
+            const { project } = await fetchProject(boardId);
+            return { boardId, projNo: project.projNo };
+          } catch {
+            return { boardId, projNo: null };
           }
-        } catch { /* skip */ }
+        })
+      );
+      const projNoMap = new Map<string, string>();
+      for (const { boardId, projNo } of results) {
+        if (projNo) projNoMap.set(boardId, projNo);
       }
-      
       setProjectNumbers(projNoMap);
     };
 
