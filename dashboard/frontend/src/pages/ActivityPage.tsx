@@ -16,11 +16,11 @@
  * - No Zoho API calls at runtime
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell, Check, Plus, Calendar, Eye, FileText, X, ArrowLeft, Trash2 } from 'lucide-react';
+import { Bell, Plus, Calendar, Eye, FileText, X, ArrowLeft, Trash2 } from 'lucide-react';
 import {
   fetchNotes, createNote, updateNote, deleteNote,
   searchUsers, searchIssues,
-  fetchNotifications, markNotificationRead, clearReadNotifications,
+  fetchNotifications, markNotificationRead,
   fetchWatchlist, toggleImportant, fetchIssueById, fetchAppConfig, fetchProject,
   type NoteEntry, type UserSearchResult, type IssueSearchResult,
   type ActivityNotification, type WatchlistEntry, type IssueItem,
@@ -32,12 +32,35 @@ import { C, R, font } from '../theme';
 export function ActivityPage() {
   const [notifications, setNotifications] = useState<ActivityNotification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [issueDetails, setIssueDetails] = useState<Map<string, { itemNo: string; projNo: string }>>(new Map());
+  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const notificationRef = useRef<HTMLDivElement>(null);
+
+  // Close notification dropdown when clicking outside
+  useEffect(() => {
+    if (!showNotifications) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
+        setShowNotifications(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showNotifications]);
+
+  // Fetch workspace name for Zoho URL construction
+  useEffect(() => {
+    fetchAppConfig().then(({ workspaceName: wn }) => setWorkspaceName(wn)).catch(() => {});
+  }, []);
 
   // Poll for notifications every 60 seconds
   useEffect(() => {
     const loadNotifications = async () => {
       try {
-        const { notifications: data } = await fetchNotifications(undefined, false);
+        const { notifications: data } = await fetchNotifications();
         setNotifications(data);
       } catch (err) {
         console.error('Failed to load notifications:', err);
@@ -49,24 +72,57 @@ export function ActivityPage() {
     return () => clearInterval(interval);
   }, []);
 
+  // Fetch issue details for notifications to get itemNo
+  useEffect(() => {
+    if (notifications.length === 0) return;
+
+    const fetchDetails = async () => {
+      const results = await Promise.all(
+        notifications.map(async (notif) => {
+          const issue = await fetchIssueById(notif.issueId);
+          const project = await fetchProject(notif.boardId).catch(() => null);
+          return {
+            issueId: notif.issueId,
+            itemNo: issue?.itemNo ?? '',
+            projNo: project?.project?.projNo ?? '',
+          };
+        })
+      );
+      const details = new Map<string, { itemNo: string; projNo: string }>();
+      for (const { issueId, itemNo, projNo } of results) {
+        if (itemNo) details.set(issueId, { itemNo, projNo });
+      }
+      setIssueDetails(details);
+    };
+
+    fetchDetails();
+  }, [notifications]);
+
   const handleMarkRead = useCallback(async (notificationId: string) => {
     try {
       await markNotificationRead(notificationId);
-      setNotifications(prev => prev.filter(n => n.id !== notificationId));
+      setReadIds(prev => new Set(prev).add(notificationId));
     } catch (err) {
       console.error('Failed to mark notification as read:', err);
     }
   }, []);
 
-  const handleClearAll = useCallback(async () => {
+  const handleMarkAllRead = useCallback(async () => {
     try {
-      await clearReadNotifications();
-      setNotifications([]);
-      setShowNotifications(false);
+      await Promise.all(
+        notifications.filter(n => !n.read && !readIds.has(n.id)).map(n => markNotificationRead(n.id))
+      );
+      setReadIds(prev => {
+        const next = new Set(prev);
+        notifications.forEach(n => next.add(n.id));
+        return next;
+      });
     } catch (err) {
-      console.error('Failed to clear notifications:', err);
+      console.error('Failed to mark all notifications as read:', err);
     }
-  }, []);
+  }, [notifications, readIds]);
+
+  const unreadCount = notifications.filter(n => !n.read && !readIds.has(n.id)).length;
 
   return (
     <div style={s.page}>
@@ -76,46 +132,80 @@ export function ActivityPage() {
             <BackButton />
             <h1 style={s.title}>Activity</h1>
           </div>
-          {notifications.length > 0 && (
-            <div style={s.notificationBell}>
-              <button
-                style={s.bellButton}
-                onClick={() => setShowNotifications(!showNotifications)}
-              >
-                <Bell size={20} strokeWidth={1.5} color={C.inkMuted} />
-                <span style={s.bellBadge}>{notifications.length}</span>
-              </button>
-              {showNotifications && (
-                <div style={s.notificationDropdown}>
-                  <div style={s.notificationHeader}>
-                    <span style={s.notificationTitle}>Notifications</span>
-                    <button style={s.clearAllBtn} onClick={handleClearAll}>Clear all</button>
-                  </div>
-                  <div style={s.notificationList}>
-                    {notifications.map(notif => (
-                      <div key={notif.id} style={s.notificationItem}>
-                        <div style={s.notificationContent}>
-                          <div style={s.notificationText}>
-                            Issue status changed: <strong>{notif.oldStatus}</strong> → <strong>{notif.newStatus}</strong>
-                          </div>
-                          <div style={s.notificationTime}>
-                            {new Date(notif.createdAt).toLocaleString()}
+          <div ref={notificationRef} style={s.notificationBell}>
+            <button
+              style={s.bellButton}
+              onClick={() => setShowNotifications(!showNotifications)}
+            >
+              <Bell size={20} strokeWidth={1.5} color={C.inkMuted} />
+              {unreadCount > 0 && <span style={s.bellBadge}>{unreadCount}</span>}
+            </button>
+            {showNotifications && (
+              <div style={s.notificationDropdown}>
+                <div style={s.notificationHeader}>
+                  <span style={s.notificationTitle}>Notifications</span>
+                  {unreadCount > 0 && (
+                    <button style={s.markAllReadBtn} onClick={handleMarkAllRead}>Mark all as read</button>
+                  )}
+                </div>
+                <div style={s.notificationList}>
+                  {notifications.length === 0 ? (
+                    <div style={s.notificationEmpty}>No notifications</div>
+                  ) : (
+                    notifications.map(notif => {
+                      const isUnread = !notif.read && !readIds.has(notif.id);
+                      const issueDetail = issueDetails.get(notif.issueId);
+                      const zohoUrl = workspaceName && issueDetail?.projNo && issueDetail?.itemNo
+                        ? `https://sprints.zoho.in/workspace/${workspaceName}#P${issueDetail.projNo}/itemdetails/I${issueDetail.itemNo}`
+                        : null;
+                      return (
+                        <div
+                          key={notif.id}
+                          style={{
+                            ...s.notificationItem,
+                            backgroundColor: isUnread ? `${C.primaryHover}26` : 'transparent',
+                          }}
+                          onClick={() => isUnread && handleMarkRead(notif.id)}
+                        >
+                          <div style={s.notificationContent}>
+                            <div style={s.notificationText}>
+                              Issue{' '}
+                              {zohoUrl ? (
+                                <a
+                                  href={zohoUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={s.notificationLink}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (isUnread) handleMarkRead(notif.id);
+                                  }}
+                                >
+                                  #{issueDetail?.itemNo}
+                                </a>
+                              ) : (
+                                <span style={s.notificationIssueId}>#{issueDetail?.itemNo ?? '—'}</span>
+                              )}
+                              {' '}status changed: <strong>{notif.oldStatus}</strong> → <strong>{notif.newStatus}</strong>
+                            </div>
+                            <div style={s.notificationTime}>
+                              {new Date(notif.createdAt).toLocaleString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit',
+                                hour12: true,
+                              })}
+                            </div>
                           </div>
                         </div>
-                        <button
-                          style={s.markReadBtn}
-                          onClick={() => handleMarkRead(notif.id)}
-                          title="Mark as read"
-                        >
-                          <Check size={16} strokeWidth={1.5} color={C.success} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                      );
+                    })
+                  )}
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -300,7 +390,7 @@ function WatchlistCard() {
               <div style={s.boardGroupContent}>
                 {/* Column headers */}
                 <div style={s.compactHeader}>
-                  <span style={{ width: 24 }}></span>
+                  <span style={{ width: 32 }}></span>
                   <span style={{ ...s.compactCol, ...s.compactColId }}>ID</span>
                   <span style={{ ...s.compactCol, flex: 1 }}>Title</span>
                   <span style={{ ...s.compactCol, ...s.compactColStatus }}>Status</span>
@@ -927,7 +1017,7 @@ const s: Record<string, React.CSSProperties> = {
   },
   compactColId: { width: 60 },
   compactColStatus: { width: 120 },
-  compactColUser: { width: 40, justifyContent: 'center' as const },
+  compactColUser: { width: 80, justifyContent: 'center' as const },
   compactColAge: { width: 50, justifyContent: 'flex-end' as const },
 
   // ── Notes card ──────────────────────────────────────────────────────────
@@ -1222,7 +1312,7 @@ const s: Record<string, React.CSSProperties> = {
     color: C.inkMuted,
     fontFamily: font.text,
   },
-  clearAllBtn: {
+  markAllReadBtn: {
     background: 'none',
     border: 'none',
     color: C.primary,
@@ -1242,6 +1332,8 @@ const s: Record<string, React.CSSProperties> = {
     gap: 12,
     padding: '12px 16px',
     borderBottom: `1px solid ${C.hairline}`,
+    cursor: 'pointer',
+    transition: 'background-color 0.15s',
   },
   notificationContent: {
     flex: 1,
@@ -1260,15 +1352,23 @@ const s: Record<string, React.CSSProperties> = {
     color: C.inkTertiary,
     fontFamily: font.text,
   },
-  markReadBtn: {
-    background: 'none',
-    border: 'none',
-    color: C.success,
-    fontSize: 18,
-    fontWeight: 700,
-    cursor: 'pointer',
-    padding: '0 4px',
-    lineHeight: 1,
-    flexShrink: 0,
+  notificationLink: {
+    color: C.primary,
+    textDecoration: 'none',
+    fontWeight: 600,
+    fontFamily: font.mono,
+    fontSize: 12,
+  },
+  notificationIssueId: {
+    color: C.inkSubtle,
+    fontFamily: font.mono,
+    fontSize: 12,
+  },
+  notificationEmpty: {
+    padding: '24px 16px',
+    textAlign: 'center' as const,
+    color: C.inkTertiary,
+    fontSize: 13,
+    fontFamily: font.text,
   },
 };

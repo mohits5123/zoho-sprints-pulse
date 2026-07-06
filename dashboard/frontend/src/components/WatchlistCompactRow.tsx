@@ -83,9 +83,9 @@ export function WatchlistCompactRow({
         <span style={{ fontSize: 11, color: C.inkSubtle, whiteSpace: 'nowrap' as const, fontFamily: font.text }}>{issue.status}</span>
       </div>
 
-      <div style={{ ...s.col, ...s.colUser }}>
+      <div style={{ ...s.col, ...s.colUser, display: 'flex', gap: 3, flexWrap: 'wrap' as const }}>
         {issue.assignees.length > 0
-          ? <UserAvatar name={issue.assignees[0].name} role={issue.assignees[0].role} size={20} />
+          ? issue.assignees.map((a) => <UserAvatar key={a.id} name={a.name} role={a.role} size={20} />)
           : <span style={s.dash}>—</span>}
       </div>
 
@@ -111,7 +111,7 @@ const s: Record<string, React.CSSProperties> = {
   col:      { display: 'flex', alignItems: 'center', flexShrink: 0 },
   colId:    { width: 60 },
   colStatus:{ width: 120 },
-  colUser:  { width: 40, justifyContent: 'center' as const },
+  colUser:  { width: 80, justifyContent: 'center' as const },
   colAge:   { width: 50, justifyContent: 'flex-end' as const, fontSize: 11, fontFamily: font.text },
   itemNo: {
     fontSize: 12, fontWeight: 400, color: C.inkTertiary,

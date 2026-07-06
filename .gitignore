@@ -43,6 +43,7 @@ review.sh
 staged-review-report.txt
 
 plan/*
+tmp/*
 
 # RAG vector store and tooling (local only, rebuilt by `npm run rag:index`)
 rag/
