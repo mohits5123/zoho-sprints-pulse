@@ -16,6 +16,9 @@
  */
 
 import prisma from '../db/client';
+import { Prisma } from '@prisma/client';
+
+type TransactionClient = Prisma.TransactionClient;
 
 /**
  * Settings key for storing the previous status snapshot of watched issues.
@@ -27,8 +30,9 @@ const WATCHED_STATUSES_KEY = 'watched_statuses_snapshot';
  * Parse the previous status snapshot from Settings.
  * Returns an empty object if not found or invalid.
  */
-async function getPreviousStatuses(): Promise<Record<string, string>> {
-  const row = await prisma.settings.findUnique({ where: { key: WATCHED_STATUSES_KEY } });
+async function getPreviousStatuses(tx?: TransactionClient): Promise<Record<string, string>> {
+  const client = tx ?? prisma;
+  const row = await client.settings.findUnique({ where: { key: WATCHED_STATUSES_KEY } });
   if (!row?.value) return {};
   try {
     return JSON.parse(row.value) as Record<string, string>;
@@ -40,8 +44,9 @@ async function getPreviousStatuses(): Promise<Record<string, string>> {
 /**
  * Save the current status snapshot to Settings.
  */
-async function savePreviousStatuses(snapshot: Record<string, string>): Promise<void> {
-  await prisma.settings.upsert({
+async function savePreviousStatuses(snapshot: Record<string, string>, tx?: TransactionClient): Promise<void> {
+  const client = tx ?? prisma;
+  await client.settings.upsert({
     where: { key: WATCHED_STATUSES_KEY },
     update: { value: JSON.stringify(snapshot) },
     create: { key: WATCHED_STATUSES_KEY, value: JSON.stringify(snapshot) },
@@ -61,66 +66,60 @@ async function savePreviousStatuses(snapshot: Record<string, string>): Promise<v
  * @returns Number of notifications created
  */
 export async function checkWatchedIssueStatusChanges(): Promise<number> {
-  // Fetch all watchlist entries
-  const watchlist = await prisma.watchlist.findMany();
-  if (watchlist.length === 0) return 0;
+  return prisma.$transaction(async (tx) => {
+    const watchlist = await tx.watchlist.findMany();
+    if (watchlist.length === 0) return 0;
 
-  // Get previous status snapshot
-  const previousStatuses = await getPreviousStatuses();
+    const previousStatuses = await getPreviousStatuses(tx);
 
-  // Build current status map for watched issues
-  const watchedIssueIds = [...new Set(watchlist.map(w => w.issueId))];
-  const currentIssues = await prisma.issue.findMany({
-    where: { zohoId: { in: watchedIssueIds } },
-    select: { zohoId: true, status: true, projectZohoId: true },
-  });
+    const watchedIssueIds = [...new Set(watchlist.map(w => w.issueId))];
+    const currentIssues = await tx.issue.findMany({
+      where: { zohoId: { in: watchedIssueIds } },
+      select: { zohoId: true, status: true, projectZohoId: true },
+    });
 
-  const currentStatusMap = new Map(currentIssues.map(i => [i.zohoId, { status: i.status, boardId: i.projectZohoId }]));
+    const currentStatusMap = new Map(currentIssues.map(i => [i.zohoId, { status: i.status, boardId: i.projectZohoId }]));
 
-  // Compare and create notifications
-  const notifications: Array<{
-    userId: string;
-    issueId: string;
-    boardId: string;
-    oldStatus: string;
-    newStatus: string;
-  }> = [];
+    const notifications: Array<{
+      userId: string;
+      issueId: string;
+      boardId: string;
+      oldStatus: string;
+      newStatus: string;
+    }> = [];
 
-  const newSnapshot: Record<string, string> = {};
+    const newSnapshot: Record<string, string> = {};
 
-  for (const entry of watchlist) {
-    const current = currentStatusMap.get(entry.issueId);
-    if (!current) continue;
+    for (const entry of watchlist) {
+      const current = currentStatusMap.get(entry.issueId);
+      if (!current) continue;
 
-    const oldStatus = previousStatuses[entry.issueId];
-    const newStatus = current.status;
+      const oldStatus = previousStatuses[entry.issueId];
+      const newStatus = current.status;
 
-    // Store current status in new snapshot
-    newSnapshot[entry.issueId] = newStatus;
+      newSnapshot[entry.issueId] = newStatus;
 
-    // If status changed and we had a previous status, create notification
-    if (oldStatus && oldStatus !== newStatus) {
-      notifications.push({
-        userId: entry.userId,
-        issueId: entry.issueId,
-        boardId: current.boardId,
-        oldStatus,
-        newStatus,
+      if (oldStatus && oldStatus !== newStatus) {
+        notifications.push({
+          userId: entry.userId,
+          issueId: entry.issueId,
+          boardId: current.boardId,
+          oldStatus,
+          newStatus,
+        });
+      }
+    }
+
+    if (notifications.length > 0) {
+      await tx.activityNotification.createMany({
+        data: notifications,
       });
     }
-  }
 
-  // Create notifications in bulk
-  if (notifications.length > 0) {
-    await prisma.activityNotification.createMany({
-      data: notifications,
-    });
-  }
+    await savePreviousStatuses(newSnapshot, tx);
 
-  // Save new snapshot
-  await savePreviousStatuses(newSnapshot);
-
-  return notifications.length;
+    return notifications.length;
+  });
 }
 
 /**
@@ -130,19 +129,21 @@ export async function checkWatchedIssueStatusChanges(): Promise<number> {
  * It populates the snapshot without creating notifications.
  */
 export async function initializeWatchedStatusesSnapshot(): Promise<void> {
-  const watchlist = await prisma.watchlist.findMany();
-  if (watchlist.length === 0) return;
+  return prisma.$transaction(async (tx) => {
+    const watchlist = await tx.watchlist.findMany();
+    if (watchlist.length === 0) return;
 
-  const watchedIssueIds = [...new Set(watchlist.map(w => w.issueId))];
-  const currentIssues = await prisma.issue.findMany({
-    where: { zohoId: { in: watchedIssueIds } },
-    select: { zohoId: true, status: true },
+    const watchedIssueIds = [...new Set(watchlist.map(w => w.issueId))];
+    const currentIssues = await tx.issue.findMany({
+      where: { zohoId: { in: watchedIssueIds } },
+      select: { zohoId: true, status: true },
+    });
+
+    const snapshot: Record<string, string> = {};
+    for (const issue of currentIssues) {
+      snapshot[issue.zohoId] = issue.status;
+    }
+
+    await savePreviousStatuses(snapshot, tx);
   });
-
-  const snapshot: Record<string, string> = {};
-  for (const issue of currentIssues) {
-    snapshot[issue.zohoId] = issue.status;
-  }
-
-  await savePreviousStatuses(snapshot);
 }
