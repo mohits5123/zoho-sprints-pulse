@@ -60,7 +60,7 @@ export function IssueRow({
       onMouseLeave={() => setHovered(false)}
       onClick={zohoUrl ? () => window.open(zohoUrl, '_blank', 'noopener,noreferrer') : undefined}
     >
-      <div style={{ width: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ width: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
         <button
           style={{
             ...s.starBtn,

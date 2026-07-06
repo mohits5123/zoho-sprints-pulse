@@ -219,9 +219,9 @@ function WatchlistCard() {
     fetchProjectDetails();
   }, [watchlist]);
 
-  const handleToggleImportant = async (issueId: string) => {
+  const handleToggleImportant = async (issueId: string, boardId: string) => {
     try {
-      await toggleImportant(issueId, 'local', 'local');
+      await toggleImportant(issueId, boardId, 'local');
       // Refetch watchlist to get updated state
       const { watchlist: data } = await fetchWatchlist(undefined, 'local');
       setWatchlist(data);
@@ -314,6 +314,7 @@ function WatchlistCard() {
                     <WatchlistCompactRow
                       key={entry.id}
                       issue={issue}
+                      boardId={entry.boardId}
                       staleDays={7}
                       watchedStates={[]}
                       workspaceName={workspaceName}

@@ -110,9 +110,15 @@ router.patch('/:issueId/toggle-important', async (req, res) => {
       return;
     }
 
+    if (existing.important) {
+      await prisma.watchlist.delete({ where: { id: existing.id } });
+      res.json({ watchlist: { ...existing, important: false } });
+      return;
+    }
+
     const updated = await prisma.watchlist.update({
       where: { id: existing.id },
-      data: { important: !existing.important },
+      data: { important: true },
     });
     res.json({ watchlist: updated });
   } catch (err) {

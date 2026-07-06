@@ -8,6 +8,7 @@ type StatusGroup = 'todo' | 'doing' | 'done' | 'unknown';
 
 export function WatchlistCompactRow({
   issue,
+  boardId,
   staleDays,
   watchedStates,
   workspaceName,
@@ -15,11 +16,12 @@ export function WatchlistCompactRow({
   onToggleImportant,
 }: {
   issue: IssueItem;
+  boardId: string;
   staleDays: number;
   watchedStates: string[];
   workspaceName: string;
   projNo: string;
-  onToggleImportant: (issueId: string) => void;
+  onToggleImportant: (issueId: string, boardId: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const dotColor = (groupColors as Record<string, string>)[issue.statusGroup as StatusGroup] ?? C.inkSubtle;
@@ -49,7 +51,7 @@ export function WatchlistCompactRow({
       onMouseLeave={() => setHovered(false)}
       onClick={zohoUrl ? () => window.open(zohoUrl, '_blank', 'noopener,noreferrer') : undefined}
     >
-      <div style={{ width: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ width: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
         <button
           style={{
             ...s.starBtn,
@@ -57,7 +59,7 @@ export function WatchlistCompactRow({
           }}
           onClick={(e) => {
             e.stopPropagation();
-            onToggleImportant(issue.zohoId);
+            onToggleImportant(issue.zohoId, boardId);
           }}
           title={issue._important ? 'Remove from important' : 'Mark as important'}
         >
