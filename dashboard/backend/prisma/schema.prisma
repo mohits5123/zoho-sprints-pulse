@@ -91,3 +91,52 @@ model BurndownSnapshot {
 
   @@id([sprintZohoId, date])
 }
+
+model Watchlist {
+  id        String   @id @default(uuid())
+  boardId   String                       // project zohoId — segregates by board
+  issueId   String                       // issue zohoId
+  userId    String                       // user zohoId — who owns this watchlist entry
+  important Boolean  @default(false)     // marks ticket as important in issue listing
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([boardId, issueId, userId])
+}
+
+model Note {
+  id               String   @id @default(uuid())
+  userId           String                       // owner of the note
+  title            String   @default("Untitled")
+  content          String   @default("")        // plain text, supports @mentions
+  issueIds         String                       // JSON string of issue zohoIds: '["zohoId1","zohoId2"]'
+  taggedUserIds    String                       // JSON string of user zohoIds mentioned: '["zohoId1","zohoId2"]'
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Deadline {
+  id        String   @id @default(uuid())
+  boardId   String?                      // project zohoId, null = across all boards
+  issueId   String?                      // issue zohoId, null = standalone reminder
+  userId    String                       // user who set the deadline
+  title     String
+  dueDate   DateTime
+  completed Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ActivityNotification {
+  id        String   @id @default(uuid())
+  userId    String
+  issueId   String                       // issue zohoId that changed
+  boardId   String                       // project zohoId
+  oldStatus String
+  newStatus String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
+}

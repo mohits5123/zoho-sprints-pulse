@@ -14,11 +14,16 @@ import healthRouter from './routes/health';
 import statusRouter from './routes/status';
 import usersRouter from './routes/users';
 import projectsRouter from './routes/projects';
+import issuesRouter from './routes/issues';
 import sprintsRouter from './routes/sprints';
 import appConfigRouter from './routes/appConfig';
 import syncStatusRouter from './routes/syncStatus';
 import burndownRouter from './routes/burndown';
 import teamRouter from './routes/team';
+import watchlistRouter from './routes/watchlist';
+import notesRouter from './routes/notes';
+import deadlinesRouter from './routes/deadlines';
+import activityRouter from './routes/activity';
 
 const router = Router();
 
@@ -41,6 +46,11 @@ router.use('/users', usersRouter);
  * Mount project endpoints at /api/projects - fetch projects, sync project list, manage board settings
  */
 router.use('/projects', projectsRouter);
+
+/**
+ * Mount issue endpoints at /api/issues - fetch individual issues by ID
+ */
+router.use('/issues', issuesRouter);
 
 /**
  * Mount sprint endpoints at /api/sprints - fetch sprints, sync sprints (fire-and-forget)
@@ -70,5 +80,25 @@ router.use('/sprints/:sprintZohoId/burndown', burndownRouter);
  * Mount team endpoints at /api/team - fetch aggregate team load metrics across all sprints
  */
 router.use('/team', teamRouter);
+
+/**
+ * Mount watchlist endpoints at /api/watchlist - manage important ticket markers
+ */
+router.use('/watchlist', watchlistRouter);
+
+/**
+ * Mount notes endpoints at /api/notes - manage notes with @mentions and issue links
+ */
+router.use('/notes', notesRouter);
+
+/**
+ * Mount deadlines endpoints at /api/deadlines - manage local reminders and deadlines
+ */
+router.use('/deadlines', deadlinesRouter);
+
+/**
+ * Mount activity endpoints at /api/activity - manage notifications and activity summary
+ */
+router.use('/activity', activityRouter);
 
 export default router;

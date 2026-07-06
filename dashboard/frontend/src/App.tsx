@@ -22,6 +22,7 @@ import { BoardPage } from './pages/BoardPage';
 import { IssueListPage } from './pages/IssueListPage';
 import { UserProfilePage } from './pages/UserProfilePage';
 import { BacklogPage } from './pages/BacklogPage';
+import { ActivityPage } from './pages/ActivityPage';
 import { LastSyncedFooter } from './components/LastSyncedFooter';
 import { SyncProgressBar } from './components/SyncProgressBar';
 import { SyncProgressProvider } from './contexts/SyncProgressContext';
@@ -72,6 +73,7 @@ function AppContent() {
           <Route path="/board/:projectId" element={<BoardPage />} />
           <Route path="/board/:projectId/issues" element={<IssueListPage />} />
           <Route path="/backlog/:projectId" element={<BacklogPage />} />
+          <Route path="/activity" element={<ActivityPage />} />
         </Routes>
       </BrowserRouter>
       <LastSyncedFooter lastSyncedAt={lastSyncedAt} />

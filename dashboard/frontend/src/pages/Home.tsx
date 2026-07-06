@@ -23,7 +23,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchStatus, fetchUsers, syncUsers, fetchProjects, syncProjects, fetchSprints, syncSprints, StatusResponse } from '../api/client';
+import { fetchStatus, fetchUsers, syncUsers, fetchProjects, syncProjects, fetchSprints, syncSprints, fetchActivitySummary, StatusResponse, ActivitySummary } from '../api/client';
 import { StatusBadge } from '../components/StatusBadge';
 import { SyncButton } from '../components/SyncButton';
 import { useSyncProgress } from '../contexts/SyncProgressContext';
@@ -38,6 +38,7 @@ export function Home() {
   const [userCount, setUserCount]         = useState<number | null>(null);
   const [projectCount, setProjectCount]   = useState<number | null>(null);
   const [sprintCount, setSprintCount]     = useState<number | null>(null);
+  const [activity, setActivity]           = useState<ActivitySummary | null>(null);
   const [syncError, setSyncError]         = useState<string | null>(null);
 
   // On mount: fetch Zoho connection status and current counts from local SQLite.
@@ -50,6 +51,7 @@ export function Home() {
     fetchUsers().then((d) => setUserCount(d.total)).catch(() => setUserCount(0));
     fetchProjects().then((d) => setProjectCount(d.total)).catch(() => setProjectCount(0));
     fetchSprints().then((d) => setSprintCount(d.total)).catch(() => setSprintCount(0));
+    fetchActivitySummary().then(setActivity).catch(() => {});
   }, []);
 
   // Refresh counts when a sync cycle completes (syncActive transitions true → false).
@@ -59,6 +61,7 @@ export function Home() {
       fetchUsers().then((d) => setUserCount(d.total)).catch(() => {});
       fetchProjects().then((d) => setProjectCount(d.total)).catch(() => {});
       fetchSprints().then((d) => setSprintCount(d.total)).catch(() => {});
+      fetchActivitySummary().then(setActivity).catch(() => {});
     }
     wasSyncActive.current = syncActive;
   }, [syncActive]);
@@ -203,6 +206,40 @@ export function Home() {
             )}
           </div>
 
+          {/* Activity card */}
+          <div
+            style={{ ...s.card, cursor: 'pointer', borderColor: '#f59e0b44' }}
+            onClick={() => navigate('/activity')}
+          >
+            <div style={s.cardHeader}>
+              <div>
+                <h2 style={s.cardTitle}>Activity</h2>
+                <p style={s.cardHint}>Watchlist, notes & deadlines</p>
+              </div>
+            </div>
+            {activity === null && <p style={s.muted}>Loading…</p>}
+            {activity !== null && (
+              <div style={s.countRow}>
+                {activity.unreadNotifications > 0 ? (
+                  <>
+                    <span style={{ ...s.count, color: '#f59e0b' }}>{activity.unreadNotifications}</span>
+                    <span style={s.countLabel}>unread notification{activity.unreadNotifications !== 1 ? 's' : ''}</span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ ...s.count, color: '#22c55e', fontSize: 24 }}>✓</span>
+                    <span style={s.countLabel}>all caught up</span>
+                  </>
+                )}
+              </div>
+            )}
+            {activity !== null && activity.upcomingDeadlines > 0 && (
+              <p style={s.deadlineHint}>
+                {activity.upcomingDeadlines} upcoming deadline{activity.upcomingDeadlines !== 1 ? 's' : ''}
+              </p>
+            )}
+          </div>
+
         </div>
 
         {/* ── Zoho connection card (bottom) ────────────────────────────── */}
@@ -266,6 +303,7 @@ const s: Record<string, React.CSSProperties> = {
   count:     { fontSize: 32, fontWeight: 700, color: '#3b82f6', lineHeight: 1 },
   countLabel:{ fontSize: 14, color: '#94a3b8' },
   syncPrompt:{ fontSize: 15, color: '#e2e8f0', margin: '0 0 6px' },
+  deadlineHint: { fontSize: 13, color: '#f59e0b', margin: '8px 0 0' },
   row:   { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #0f172a' },
   label: { fontSize: 14, color: '#94a3b8' },
   value: { fontSize: 14, color: '#e2e8f0', fontWeight: 500 },

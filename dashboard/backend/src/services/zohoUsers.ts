@@ -3,6 +3,7 @@ import { getAccessToken } from './zohoAuth';
 import { config } from '../config';
 import prisma from '../db/client';
 import { zohoThrottle } from './rateLimiter';
+import { fetchTeams } from './zohoTeams';
 
 /**
  * Zoho user profile with basic information.
@@ -33,7 +34,8 @@ const SETTINGS_KEY_WORKSPACE_NAME = 'zoho_workspace_name';
  *
  * Strategy:
  * 1. Check the `Settings` table for a previously cached `zoho_team_id`.
- * 2. If missing, hit Zoho's `/teams/` endpoint to discover the ID on first run.
+ * 2. If missing, fetch from Zoho's `/teams/` endpoint via the shared
+ *    15-minute in-memory cache (avoids redundant API calls).
  * 3. Cache the result back to `Settings` so subsequent calls are O(1).
  *
  * Also derives and caches a workspace slug from the org/team name.
@@ -45,16 +47,8 @@ async function resolveTeamId(): Promise<string> {
   const cached = await prisma.settings.findUnique({ where: { key: SETTINGS_KEY_TEAM_ID } });
   if (cached?.value) return cached.value;
 
-  // First-time discovery — fetch from Zoho /teams/ endpoint
-  const token = getAccessToken();
-  await zohoThrottle.wait('teams/discover');
-  const teamsRes = await axios.get(
-    `${config.zoho.apiBaseUrl}/teams/`,
-    { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-  );
-  zohoThrottle.record(teamsRes.status);
-
-  const teamsData = teamsRes.data;
+  // First-time discovery — fetch from shared cache (hits Zoho only if cache expired)
+  const teamsData = await fetchTeams();
 
   // Extract organization ID from Zoho response (multiple possible fields)
   const zsoid: string | undefined =

@@ -321,6 +321,7 @@ export interface IssueItem {
   endDate:     string | null;
   delayedDays: number;
   isStale:     boolean;
+  _important?: boolean;
 }
 
 /**
@@ -348,7 +349,7 @@ export interface IssueItem {
 export async function fetchIssues(
   projectId: string,
   sprintId:  string,
-  opts: { status?: string; statusGroup?: string; epicId?: string; userId?: string; creatorOnly?: boolean; stale?: boolean; staleDays?: number; watchedStates?: string[] } = {},
+  opts: { status?: string; statusGroup?: string; epicId?: string; userId?: string; creatorOnly?: boolean; stale?: boolean; staleDays?: number; watchedStates?: string[]; important?: boolean } = {},
 ): Promise<{ issues: IssueItem[] }> {
   const params: Record<string, string | number> = {};
   if (opts.status)         params.status        = opts.status;
@@ -359,6 +360,7 @@ export async function fetchIssues(
   if (opts.stale)          params.stale         = 'true';
   if (opts.staleDays)      params.staleDays     = opts.staleDays;
   if (opts.watchedStates?.length) params.watchedStates = opts.watchedStates.join(',');
+  if (opts.important)      params.important     = 'true';
   // `params` is converted by Axios into a URL query string (e.g. ?status=Todo&stale=true).
   const res = await apiClient.get<{ issues: IssueItem[] }>(`/projects/${projectId}/sprints/${sprintId}/issues`, { params });
   return res.data;
@@ -388,7 +390,7 @@ export async function fetchIssues(
  */
 export async function fetchIssuesKanban(
   projectId: string,
-  opts: { status?: string; statusGroup?: string; epicId?: string; userId?: string; creatorOnly?: boolean; stale?: boolean; staleDays?: number; watchedStates?: string[] } = {},
+  opts: { status?: string; statusGroup?: string; epicId?: string; userId?: string; creatorOnly?: boolean; stale?: boolean; staleDays?: number; watchedStates?: string[]; important?: boolean } = {},
 ): Promise<{ issues: IssueItem[] }> {
   const params: Record<string, string | number> = {};
   if (opts.status)         params.status        = opts.status;
@@ -399,9 +401,25 @@ export async function fetchIssuesKanban(
   if (opts.stale)          params.stale         = 'true';
   if (opts.staleDays)      params.staleDays     = opts.staleDays;
   if (opts.watchedStates?.length) params.watchedStates = opts.watchedStates.join(',');
+  if (opts.important)      params.important     = 'true';
   // `params` is converted by Axios into a URL query string (e.g. ?status=Todo&stale=true).
   const res = await apiClient.get<{ issues: IssueItem[] }>(`/projects/${projectId}/kanban/issues`, { params });
   return res.data;
+}
+
+/**
+ * Fetch a single issue by its Zoho ID.
+ *
+ * @param issueId - The Zoho ID of the issue to fetch.
+ * @returns The IssueItem or null if not found.
+ */
+export async function fetchIssueById(issueId: string): Promise<IssueItem | null> {
+  try {
+    const res = await apiClient.get<{ issue: IssueItem }>(`/issues/${issueId}`);
+    return res.data.issue;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -949,5 +967,339 @@ export async function fetchBacklogStats(
     params.watchedStates = watchedStates.join(',');
   }
   const res = await apiClient.get<BacklogStats>(`/projects/${projectId}/backlog-stats`, { params });
+  return res.data;
+}
+
+// ── Watchlist ─────────────────────────────────────────────────────────────────
+
+/**
+ * Watchlist entry — an issue marked as important by a user on a specific board.
+ */
+export interface WatchlistEntry {
+  id:        string;
+  boardId:   string;
+  issueId:   string;
+  userId:    string;
+  important: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Add or update an issue in the watchlist.
+ *
+ * @param data - Object containing boardId, issueId, userId, and optional important flag.
+ * @returns The created or updated watchlist entry.
+ *
+ * @remarks
+ * This is an upsert — if the same (boardId, issueId, userId) combo already exists,
+ * the existing entry is updated with the new important value.
+ */
+export async function addToWatchlist(data: { boardId: string; issueId: string; userId: string; important?: boolean }): Promise<WatchlistEntry> {
+  const res = await apiClient.post<{ watchlist: WatchlistEntry }>('/watchlist', data);
+  return res.data.watchlist;
+}
+
+/**
+ * Remove an issue from the watchlist.
+ *
+ * @param issueId - The Zoho issue ID to remove.
+ * @param boardId - Optional board/project filter.
+ * @param userId - Optional user filter.
+ *
+ * @returns Confirmation object.
+ */
+export async function removeFromWatchlist(issueId: string, boardId?: string, userId?: string): Promise<{ deleted: boolean }> {
+  const res = await apiClient.delete<{ deleted: boolean }>(`/watchlist/${issueId}`, { data: { boardId, userId } });
+  return res.data;
+}
+
+/**
+ * Toggle the importance flag on a watchlist entry.
+ *
+ * @param issueId - The Zoho issue ID to toggle.
+ * @param boardId - The board/project ID.
+ * @param userId - The user ID.
+ * @returns The updated watchlist entry with toggled important flag.
+ */
+export async function toggleImportant(issueId: string, boardId: string, userId: string): Promise<WatchlistEntry> {
+  const res = await apiClient.patch<{ watchlist: WatchlistEntry }>(`/watchlist/${issueId}/toggle-important`, { boardId, userId });
+  return res.data.watchlist;
+}
+
+/**
+ * Fetch all watchlist entries for a board and/or user.
+ *
+ * @param boardId - Optional board/project ID to filter by.
+ * @param userId - Optional user ID to filter by.
+ * @returns Watchlist entries with pagination metadata.
+ */
+export async function fetchWatchlist(boardId?: string, userId?: string): Promise<{ watchlist: WatchlistEntry[]; total: number }> {
+  const params: Record<string, string> = {};
+  if (boardId) params.boardId = boardId;
+  if (userId) params.userId = userId;
+  const res = await apiClient.get<{ watchlist: WatchlistEntry[]; total: number }>('/watchlist', { params });
+  return res.data;
+}
+
+// ── Notes ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Note entry — a user-created note with optional @mentions and linked issues.
+ */
+export interface NoteEntry {
+  id:            string;
+  userId:        string;
+  title:         string;
+  content:       string;
+  issueIds:      string;       // JSON string of issue zohoIds
+  taggedUserIds: string;       // JSON string of user zohoIds
+  createdAt:     string;
+  updatedAt:     string;
+}
+
+/**
+ * Lightweight user info returned by search-users endpoint.
+ */
+export interface UserSearchResult {
+  id:   string;
+  name: string;
+}
+
+/**
+ * Lightweight issue info returned by search-issues endpoint.
+ */
+export interface IssueSearchResult {
+  zohoId: string;
+  itemNo: string;
+  title:  string;
+}
+
+/**
+ * Fetch all notes for a user.
+ *
+ * @param userId - Optional user ID to filter by.
+ * @returns Notes array with pagination metadata.
+ */
+export async function fetchNotes(userId?: string): Promise<{ notes: NoteEntry[]; total: number }> {
+  const params: Record<string, string> = {};
+  if (userId) params.userId = userId;
+  const res = await apiClient.get<{ notes: NoteEntry[]; total: number }>('/notes', { params });
+  return res.data;
+}
+
+/**
+ * Create a new note.
+ *
+ * @param data - Object containing userId and optional title, content, issueIds, taggedUserIds.
+ * @returns The created note.
+ */
+export async function createNote(data: { userId: string; title?: string; content?: string; issueIds?: string[]; taggedUserIds?: string[] }): Promise<NoteEntry> {
+  const res = await apiClient.post<{ note: NoteEntry }>('/notes', data);
+  return res.data.note;
+}
+
+/**
+ * Update an existing note.
+ *
+ * @param noteId - The note UUID to update.
+ * @param data - Object containing optional title, content, issueIds, taggedUserIds.
+ * @returns The updated note.
+ */
+export async function updateNote(noteId: string, data: { title?: string; content?: string; issueIds?: string[]; taggedUserIds?: string[] }): Promise<NoteEntry> {
+  const res = await apiClient.patch<{ note: NoteEntry }>(`/notes/${noteId}`, data);
+  return res.data.note;
+}
+
+/**
+ * Delete a note.
+ *
+ * @param noteId - The note UUID to delete.
+ * @returns Confirmation object.
+ */
+export async function deleteNote(noteId: string): Promise<{ deleted: boolean }> {
+  const res = await apiClient.delete<{ deleted: boolean }>(`/notes/${noteId}`);
+  return res.data;
+}
+
+/**
+ * Search users by name for @mentions.
+ *
+ * @param q - Search query (partial name match).
+ * @returns Array of matching users with id and name.
+ */
+export async function searchUsers(q: string): Promise<{ users: UserSearchResult[] }> {
+  const res = await apiClient.get<{ users: UserSearchResult[] }>('/notes/search-users', { params: { q } });
+  return res.data;
+}
+
+/**
+ * Search issues by title for linking.
+ *
+ * @param q - Search query (partial title match).
+ * @param boardId - Optional board/project ID to scope the search.
+ * @returns Array of matching issues with zohoId, itemNo, and title.
+ */
+export async function searchIssues(q: string, boardId?: string): Promise<{ issues: IssueSearchResult[] }> {
+  const params: Record<string, string> = { q };
+  if (boardId) params.boardId = boardId;
+  const res = await apiClient.get<{ issues: IssueSearchResult[] }>('/notes/search-issues', { params });
+  return res.data;
+}
+
+// ── Deadlines ─────────────────────────────────────────────────────────────────
+
+/**
+ * Deadline entry — a local reminder or deadline for a watched issue.
+ */
+export interface DeadlineEntry {
+  id:        string;
+  boardId:   string | null;
+  issueId:   string | null;
+  userId:    string;
+  title:     string;
+  dueDate:   string;
+  completed: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Fetch all deadlines, optionally filtered by user and/or board.
+ *
+ * @param userId - Optional user ID to filter by.
+ * @param boardId - Optional board/project ID to filter by.
+ * @returns Deadlines array with pagination metadata.
+ */
+export async function fetchDeadlines(userId?: string, boardId?: string): Promise<{ deadlines: DeadlineEntry[]; total: number }> {
+  const params: Record<string, string> = {};
+  if (userId) params.userId = userId;
+  if (boardId) params.boardId = boardId;
+  const res = await apiClient.get<{ deadlines: DeadlineEntry[]; total: number }>('/deadlines', { params });
+  return res.data;
+}
+
+/**
+ * Create a new deadline.
+ *
+ * @param data - Object containing userId, title, dueDate, and optional boardId, issueId, completed.
+ * @returns The created deadline.
+ */
+export async function createDeadline(data: { userId: string; title: string; dueDate: string; boardId?: string; issueId?: string; completed?: boolean }): Promise<DeadlineEntry> {
+  const res = await apiClient.post<{ deadline: DeadlineEntry }>('/deadlines', data);
+  return res.data.deadline;
+}
+
+/**
+ * Update an existing deadline.
+ *
+ * @param deadlineId - The deadline UUID to update.
+ * @param data - Object containing optional title, dueDate, boardId, issueId, completed.
+ * @returns The updated deadline.
+ */
+export async function updateDeadline(deadlineId: string, data: { title?: string; dueDate?: string; boardId?: string | null; issueId?: string | null; completed?: boolean }): Promise<DeadlineEntry> {
+  const res = await apiClient.patch<{ deadline: DeadlineEntry }>(`/deadlines/${deadlineId}`, data);
+  return res.data.deadline;
+}
+
+/**
+ * Delete a deadline.
+ *
+ * @param deadlineId - The deadline UUID to delete.
+ * @returns Confirmation object.
+ */
+export async function deleteDeadline(deadlineId: string): Promise<{ deleted: boolean }> {
+  const res = await apiClient.delete<{ deleted: boolean }>(`/deadlines/${deadlineId}`);
+  return res.data;
+}
+
+/**
+ * Fetch upcoming deadlines within N hours from now.
+ *
+ * @param userId - Optional user ID to filter by.
+ * @param hours - Number of hours ahead to check (default: 24).
+ * @returns Upcoming deadlines array with pagination metadata.
+ */
+export async function fetchUpcomingDeadlines(userId?: string, hours: number = 24): Promise<{ deadlines: DeadlineEntry[]; total: number }> {
+  const params: Record<string, string | number> = { hours };
+  if (userId) params.userId = userId;
+  const res = await apiClient.get<{ deadlines: DeadlineEntry[]; total: number }>('/deadlines/upcoming', { params });
+  return res.data;
+}
+
+// ── Activity (Notifications) ──────────────────────────────────────────────────
+
+/**
+ * Activity notification — a status change notification for a watched ticket.
+ */
+export interface ActivityNotification {
+  id:        string;
+  userId:    string;
+  issueId:   string;
+  boardId:   string;
+  oldStatus: string;
+  newStatus: string;
+  read:      boolean;
+  createdAt: string;
+}
+
+/**
+ * Activity summary counts.
+ */
+export interface ActivitySummary {
+  unreadNotifications: number;
+  upcomingDeadlines:   number;
+  importantIssues:     number;
+}
+
+/**
+ * Fetch notifications for a user.
+ *
+ * @param userId - Optional user ID to filter by.
+ * @param read - Optional filter by read status (true/false).
+ * @returns Notifications array with pagination metadata.
+ */
+export async function fetchNotifications(userId?: string, read?: boolean): Promise<{ notifications: ActivityNotification[]; total: number }> {
+  const params: Record<string, string | boolean> = {};
+  if (userId) params.userId = userId;
+  if (read !== undefined) params.read = read;
+  const res = await apiClient.get<{ notifications: ActivityNotification[]; total: number }>('/activity/notifications', { params });
+  return res.data;
+}
+
+/**
+ * Mark a notification as read.
+ *
+ * @param notificationId - The notification UUID to mark as read.
+ * @returns The updated notification.
+ */
+export async function markNotificationRead(notificationId: string): Promise<ActivityNotification> {
+  const res = await apiClient.patch<{ notification: ActivityNotification }>(`/activity/notifications/${notificationId}/read`);
+  return res.data.notification;
+}
+
+/**
+ * Clear all read notifications.
+ *
+ * @param userId - Optional user ID to scope the deletion.
+ * @returns Number of deleted notifications.
+ */
+export async function clearReadNotifications(userId?: string): Promise<{ deleted: number }> {
+  const params: Record<string, string> = {};
+  if (userId) params.userId = userId;
+  const res = await apiClient.delete<{ deleted: number }>('/activity/notifications', { params });
+  return res.data;
+}
+
+/**
+ * Fetch activity summary counts.
+ *
+ * @param userId - Optional user ID to filter by.
+ * @returns Summary counts for unread notifications, upcoming deadlines, and important issues.
+ */
+export async function fetchActivitySummary(userId?: string): Promise<ActivitySummary> {
+  const params: Record<string, string> = {};
+  if (userId) params.userId = userId;
+  const res = await apiClient.get<ActivitySummary>('/activity/summary', { params });
   return res.data;
 }

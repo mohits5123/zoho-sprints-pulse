@@ -271,8 +271,9 @@ router.get('/:id/sprints/:sprintId/issues', async (req, res) => {
     const staleOnly          = req.query.stale         === 'true';
     const staleDays          = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
     const watchedStates      = req.query.watchedStates ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean) : [];
+    const watchlisted        = req.query.important     === 'true';
 
-    const issues = await queryIssues(project.zohoId, sprint.zohoId, { statusFilter, statusGroupFilter, epicFilter, userFilter, creatorOnly, staleOnly, staleDays, watchedStates });
+    const issues = await queryIssues(project.zohoId, sprint.zohoId, { statusFilter, statusGroupFilter, epicFilter, userFilter, creatorOnly, staleOnly, staleDays, watchedStates, watchlisted });
     res.json({ issues });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
@@ -605,8 +606,9 @@ router.get('/:id/kanban/issues', async (req, res) => {
     const staleOnly          = req.query.stale         === 'true';
     const staleDays          = Math.max(1, parseInt(String(req.query.staleDays ?? '7'), 10) || 7);
     const watchedStates      = req.query.watchedStates ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean) : [];
+    const watchlisted        = req.query.important     === 'true';
 
-    const issues = await queryKanbanBoardIssues(project.zohoId, staleDays, watchedStates, userFilter, creatorOnly);
+    const issues = await queryKanbanBoardIssues(project.zohoId, staleDays, watchedStates, userFilter, creatorOnly, watchlisted);
 
     // Apply additional filters at query time (status, statusGroup, epic, stale)
     const filtered = issues.filter((issue): boolean => {

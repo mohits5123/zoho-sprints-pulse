@@ -79,6 +79,7 @@ export interface IssueQueryOpts {
   staleOnly?:         boolean;
   staleDays?:         number;
   watchedStates?:     string[];
+  watchlisted?:       boolean;  // If true, only return issues that are in the user's watchlist with important=true
 }
 
 /**
@@ -294,6 +295,7 @@ function toIssueItem(
     endDate:     issue.endDate   ?? null,
     delayedDays,
     isStale,
+    _important:  false,
   };
 }
 
@@ -333,7 +335,7 @@ function toIssueItem(
 function applyFilters(issues: IssueItem[], opts: IssueQueryOpts): IssueItem[] {
   const {
     statusFilter, statusGroupFilter, epicFilter,
-    userFilter, creatorOnly = false, staleOnly = false,
+    userFilter, creatorOnly = false, staleOnly = false, watchlisted = false,
   } = opts;
 
   return issues.filter((issue): boolean => {
@@ -351,6 +353,7 @@ function applyFilters(issues: IssueItem[], opts: IssueQueryOpts): IssueItem[] {
       if (creatorOnly ? !isCreator : (!isCreator && !isAssignee)) return false;
     }
     if (staleOnly && !issue.isStale) return false;
+    if (watchlisted && !issue._important) return false;
     return true;
   });
 }
@@ -413,7 +416,7 @@ export async function queryIssues(
   sprintZohoId:  string,
   opts: IssueQueryOpts = {},
 ): Promise<IssueItem[]> {
-  const { staleDays = 7, watchedStates = [] } = opts;
+  const { staleDays = 7, watchedStates = [], watchlisted = false } = opts;
 
   const dbIssues = await prisma.issue.findMany({
     where: { projectZohoId, sprintZohoId },
@@ -424,6 +427,14 @@ export async function queryIssues(
   // Transform raw DB rows to enriched IssueItems with computed fields
   let issues = dbIssues.map(i => toIssueItem(i, userMap, staleDays, watchedStates));
   
+  // Always fetch watchlist and mark important issues (using 'local' as the user ID)
+  const watchlist = await prisma.watchlist.findMany({
+    where: { userId: 'local' },
+    select: { issueId: true, important: true },
+  });
+  const importantIds = new Set(watchlist.filter(w => w.important).map(w => w.issueId));
+  issues = issues.map(i => ({ ...i, _important: importantIds.has(i.zohoId) }));
+  
   // Filter by watched states if configured (for staleness calculation and bar graph)
   // If watchedStates is empty, show all issues (default behavior)
   if (watchedStates.length > 0) {
@@ -432,7 +443,7 @@ export async function queryIssues(
     issues = filtered;
   }
   
-  // Apply any runtime filters (status, epic, user, stale)
+  // Apply any runtime filters (status, epic, user, stale, watchlisted)
   return applyFilters(issues, opts);
 }
 
@@ -455,6 +466,7 @@ export async function queryKanbanBoardIssues(
   watchedStates: string[] = [],
   userFilter?: string,
   creatorOnly?: boolean,
+  watchlisted?: boolean,
 ): Promise<IssueItem[]> {
   // Identify kanban board sprint IDs (type=[7] sprints)
   const kanbanSprints = await prisma.sprint.findMany({
@@ -485,6 +497,14 @@ export async function queryKanbanBoardIssues(
   // Transform raw DB rows to enriched IssueItems with computed fields
   let filteredIssues: IssueItem[] = kanbanIssues.map(i => toIssueItem(i, userMap, staleDays, watchedStates));
   
+  // Always fetch watchlist and mark important issues (using 'local' as the user ID)
+  const watchlist = await prisma.watchlist.findMany({
+    where: { userId: 'local' },
+    select: { issueId: true, important: true },
+  });
+  const importantIds = new Set(watchlist.filter(w => w.important).map(w => w.issueId));
+  filteredIssues = filteredIssues.map(i => ({ ...i, _important: importantIds.has(i.zohoId) }));
+  
   // Filter by watched states if configured
   if (watchedStates.length > 0) {
     filteredIssues = filteredIssues.filter(issue => watchedStates.includes(issue.status));
@@ -497,6 +517,11 @@ export async function queryKanbanBoardIssues(
       const matchesCreatorOnly = creatorOnly ? (issue.creator?.id === userFilter) : true;
       return matchesUserFilter && matchesCreatorOnly;
     });
+  }
+  
+  // Apply watchlisted filter
+  if (watchlisted) {
+    filteredIssues = filteredIssues.filter(issue => issue._important);
   }
   
   return filteredIssues;
@@ -555,6 +580,41 @@ export async function queryBacklogIssues(
   }
   
   return backlogIssues;
+}
+
+/**
+ * Query a single issue by its Zoho ID.
+ * Returns the full IssueItem with all computed fields.
+ *
+ * @param issueZohoId - The Zoho ID of the issue to fetch
+ * @param staleDays - Threshold in days for staleness (default: 7)
+ * @param watchedStates - Array of statuses to watch for staleness
+ * @returns The IssueItem or null if not found
+ */
+export async function queryIssueById(
+  issueZohoId: string,
+  staleDays: number = 7,
+  watchedStates: string[] = [],
+): Promise<IssueItem | null> {
+  const dbIssue = await prisma.issue.findUnique({
+    where: { zohoId: issueZohoId },
+  });
+
+  if (!dbIssue) return null;
+
+  const userMap = await buildUserMap();
+  const issue = toIssueItem(dbIssue, userMap, staleDays, watchedStates);
+
+  // Mark as important if in watchlist
+  const watchlist = await prisma.watchlist.findFirst({
+    where: { issueId: issueZohoId, userId: 'local' },
+    select: { important: true },
+  });
+  if (watchlist) {
+    issue._important = watchlist.important;
+  }
+
+  return issue;
 }
 
 /**
