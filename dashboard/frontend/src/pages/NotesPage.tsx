@@ -79,6 +79,20 @@ function localToUTC(dateStr: string, timeStr: string): string {
   return localDate.toISOString();
 }
 
+function isSafeUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  // Allow relative URLs
+  if (url.startsWith('/') || url.startsWith('./') || url.startsWith('../')) return true;
+  // Allow http/https protocols only
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    // If URL parsing fails, reject it
+    return false;
+  }
+}
+
 function MarkdownRenderer({ content, onCheckboxToggle }: { content: string; onCheckboxToggle?: (index: number) => void }) {
   return (
     <div data-markdown-content>
@@ -98,7 +112,9 @@ function MarkdownRenderer({ content, onCheckboxToggle }: { content: string; onCh
             return <code style={mdS.codeInline}>{children}</code>;
           },
           pre: ({ children }) => <pre style={mdS.pre}>{children}</pre>,
-          a: ({ href, children }) => <a href={href} style={mdS.a} target="_blank" rel="noopener noreferrer">{children}</a>,
+          a: ({ href, children }) => (
+            <a href={isSafeUrl(href) ? href : undefined} style={mdS.a} target="_blank" rel="noopener noreferrer">{children}</a>
+          ),
           blockquote: ({ children }) => <blockquote style={mdS.blockquote}>{children}</blockquote>,
           ul: ({ children }) => <ul style={mdS.ul}>{children}</ul>,
           ol: ({ children }) => <ol style={mdS.ol}>{children}</ol>,
