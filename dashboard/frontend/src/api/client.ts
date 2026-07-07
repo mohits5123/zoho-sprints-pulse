@@ -1276,8 +1276,8 @@ export interface ActivityNotification {
   id:        string;
   userId:    string;
   type:      string;
-  issueId:   string;
-  boardId:   string;
+  issueId:   string | null;
+  boardId:   string | null;
   noteId:    string | null;
   oldStatus: string;
   newStatus: string;

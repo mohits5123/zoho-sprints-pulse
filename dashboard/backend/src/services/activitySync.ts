@@ -152,8 +152,8 @@ export async function checkNoteDeadlineNotifications(): Promise<number> {
     const notifications: Array<{
       userId: string;
       type: string;
-      issueId: string;
-      boardId: string;
+      issueId: string | null;
+      boardId: string | null;
       noteId: string;
       oldStatus: string;
       newStatus: string;
@@ -169,8 +169,8 @@ export async function checkNoteDeadlineNotifications(): Promise<number> {
         notifications.push({
           userId: note.userId,
           type: 'deadline_reminder',
-          issueId: issueIds[0] || '',
-          boardId: '',
+          issueId: issueIds[0] || null,
+          boardId: null,
           noteId: note.id,
           oldStatus: 'deadline_reminder',
           newStatus: note.state,
@@ -196,8 +196,8 @@ export async function checkNoteDeadlineNotifications(): Promise<number> {
           notifications.push({
             userId: note.userId,
             type: 'deadline_day_of',
-            issueId: issueIds[0] || '',
-            boardId: '',
+            issueId: issueIds[0] || null,
+            boardId: null,
             noteId: note.id,
             oldStatus: 'deadline_day_of',
             newStatus: note.state,

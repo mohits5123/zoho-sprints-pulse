@@ -134,8 +134,8 @@ model ActivityNotification {
   id        String   @id @default(uuid())
   userId    String
   type      String   @default("status_change")  // "status_change" | "deadline_reminder" | "deadline_day_of" | "deadline_overdue"
-  issueId   String   @default("")                // issue zohoId (empty for note deadlines)
-  boardId   String   @default("")                // project zohoId (empty for note deadlines)
+  issueId   String?                              // issue zohoId (null for note deadlines)
+  boardId   String?                              // project zohoId (null for note deadlines)
   noteId    String?                              // note UUID if related to a note deadline
   oldStatus String   @default("")
   newStatus String   @default("")

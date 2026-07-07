@@ -59,7 +59,7 @@ export function ActivityPage() {
         notifications.map(async (notif) => {
           if (notif.type !== 'status_change' || !notif.issueId) return null;
           const issue = await fetchIssueById(notif.issueId);
-          const project = await fetchProject(notif.boardId).catch(() => null);
+          const project = notif.boardId ? await fetchProject(notif.boardId).catch(() => null) : null;
           return {
             issueId: notif.issueId,
             itemNo: issue?.itemNo ?? '',
@@ -164,7 +164,7 @@ export function ActivityPage() {
                       const isUnread = !notif.read && !readIds.has(notif.id);
                       const isStatusChange = notif.type === 'status_change' || !notif.type;
                       const isNoteNotif = !!notif.noteId;
-                      const issueDetail = isStatusChange ? issueDetails.get(notif.issueId) : null;
+                      const issueDetail = isStatusChange && notif.issueId ? issueDetails.get(notif.issueId) : null;
                       const noteTitle = isNoteNotif && notif.noteId ? noteDetails.get(notif.noteId) : null;
                       const zohoUrl = workspaceName && issueDetail?.projNo && issueDetail?.itemNo
                         ? `https://sprints.zoho.in/workspace/${workspaceName}#P${issueDetail.projNo}/itemdetails/I${issueDetail.itemNo}`
