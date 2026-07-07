@@ -164,8 +164,15 @@ export async function checkNoteDeadlineNotifications(): Promise<number> {
 
       const deadline = new Date(note.deadline);
 
+      let issueIds: string[];
+      try {
+        issueIds = JSON.parse(note.issueIds || '[]') as string[];
+      } catch {
+        console.warn(`Skipping note ${note.id}: malformed issueIds JSON`);
+        continue;
+      }
+
       if (deadline >= now && deadline <= tomorrow && !note.deadlineNotified) {
-        const issueIds = JSON.parse(note.issueIds || '[]') as string[];
         notifications.push({
           userId: note.userId,
           type: 'deadline_reminder',
@@ -192,7 +199,6 @@ export async function checkNoteDeadlineNotifications(): Promise<number> {
         });
 
         if (!existingDayOf) {
-          const issueIds = JSON.parse(note.issueIds || '[]') as string[];
           notifications.push({
             userId: note.userId,
             type: 'deadline_day_of',
