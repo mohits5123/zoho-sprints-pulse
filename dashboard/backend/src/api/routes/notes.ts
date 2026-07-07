@@ -39,6 +39,15 @@ router.post('/', async (req, res) => {
       return;
     }
 
+    let parsedDeadline: Date | null = null;
+    if (deadline) {
+      parsedDeadline = new Date(deadline);
+      if (isNaN(parsedDeadline.getTime())) {
+        res.status(400).json({ error: 'Invalid deadline date' });
+        return;
+      }
+    }
+
     const note = await prisma.note.create({
       data: {
         userId,
@@ -47,7 +56,7 @@ router.post('/', async (req, res) => {
         issueIds: JSON.stringify(issueIds ?? []),
         taggedUserIds: JSON.stringify(taggedUserIds ?? []),
         state: state ?? 'active',
-        deadline: deadline ? new Date(deadline) : null,
+        deadline: parsedDeadline,
       },
     });
     res.json({ note });
@@ -93,7 +102,18 @@ router.patch('/:noteId', async (req, res) => {
     if (issueIds !== undefined) data.issueIds = JSON.stringify(issueIds);
     if (taggedUserIds !== undefined) data.taggedUserIds = JSON.stringify(taggedUserIds);
     if (state !== undefined) data.state = state;
-    if (deadline !== undefined) data.deadline = deadline ? new Date(deadline) : null;
+    if (deadline !== undefined) {
+      if (deadline) {
+        const parsedDeadline = new Date(deadline);
+        if (isNaN(parsedDeadline.getTime())) {
+          res.status(400).json({ error: 'Invalid deadline date' });
+          return;
+        }
+        data.deadline = parsedDeadline;
+      } else {
+        data.deadline = null;
+      }
+    }
     if (deadlineNotified !== undefined) data.deadlineNotified = deadlineNotified;
 
     if (Object.keys(data).length === 0) {
