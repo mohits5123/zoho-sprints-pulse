@@ -39,6 +39,11 @@ router.post('/', async (req, res) => {
       return;
     }
 
+    if (state !== undefined && state !== 'active' && state !== 'closed') {
+      res.status(400).json({ error: 'state must be "active" or "closed"' });
+      return;
+    }
+
     let parsedDeadline: Date | null = null;
     if (deadline) {
       parsedDeadline = new Date(deadline);
@@ -101,7 +106,13 @@ router.patch('/:noteId', async (req, res) => {
     if (content !== undefined) data.content = content;
     if (issueIds !== undefined) data.issueIds = JSON.stringify(issueIds);
     if (taggedUserIds !== undefined) data.taggedUserIds = JSON.stringify(taggedUserIds);
-    if (state !== undefined) data.state = state;
+    if (state !== undefined) {
+      if (state !== 'active' && state !== 'closed') {
+        res.status(400).json({ error: 'state must be "active" or "closed"' });
+        return;
+      }
+      data.state = state;
+    }
     if (deadline !== undefined) {
       if (deadline) {
         const parsedDeadline = new Date(deadline);
