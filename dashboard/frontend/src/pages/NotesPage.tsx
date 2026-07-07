@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Plus, Trash2, Edit3, Eye, X, Check, Calendar,
-  Lock, Unlock,
+  Lock, Unlock, Upload,
 } from 'lucide-react';
 import {
   fetchNotes, createNote, updateNote, deleteNote,
@@ -191,6 +191,7 @@ export function NotesPage() {
   const [mentionIdx, setMentionIdx] = useState(0);
   const [mentionPosition, setMentionPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [issueSearchQuery, setIssueSearchQuery] = useState('');
   const [issueSearchResults, setIssueSearchResults] = useState<IssueSearchResult[]>([]);
@@ -317,6 +318,26 @@ export function NotesPage() {
       setMentionOpen(false);
     }
   }, [noteId, scheduleSave]);
+
+  const handleImportMarkdown = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      setEditContent(text);
+      if (!editTitle || editTitle === 'Untitled') {
+        setEditTitle(file.name.replace(/\.(md|markdown|txt)$/i, ''));
+      }
+      if (noteId) scheduleSave(noteId, { content: text });
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }, [editTitle, noteId, scheduleSave]);
 
   const calculateCursorCoordinates = useCallback(() => {
     const textarea = textareaRef.current;
@@ -632,6 +653,17 @@ export function NotesPage() {
               />
 
               <div style={s.editorToolbar}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".md,.markdown,.txt"
+                  style={{ display: 'none' }}
+                  onChange={handleFileSelected}
+                />
+                <button style={s.importBtn} onClick={handleImportMarkdown}>
+                  <Upload size={12} style={{ marginRight: 4 }} />
+                  Import
+                </button>
                 <button
                   style={{
                     ...s.previewToggle,
@@ -1048,8 +1080,23 @@ const s: Record<string, React.CSSProperties> = {
   },
   editorToolbar: {
     display: 'flex',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 8,
+    gap: 8,
+  },
+  importBtn: {
+    padding: '4px 10px',
+    backgroundColor: 'transparent',
+    border: `1px solid ${C.hairline}`,
+    borderRadius: R.sm,
+    color: C.primary,
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: font.text,
+    display: 'flex',
+    alignItems: 'center',
   },
   previewToggle: {
     padding: '4px 10px',
