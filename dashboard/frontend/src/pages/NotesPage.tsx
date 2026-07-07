@@ -79,39 +79,69 @@ function localToUTC(dateStr: string, timeStr: string): string {
   return localDate.toISOString();
 }
 
-function MarkdownRenderer({ content }: { content: string }) {
+function MarkdownRenderer({ content, onCheckboxToggle }: { content: string; onCheckboxToggle?: (index: number) => void }) {
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        h1: ({ children }) => <h1 style={mdS.h1}>{children}</h1>,
-        h2: ({ children }) => <h2 style={mdS.h2}>{children}</h2>,
-        h3: ({ children }) => <h3 style={mdS.h3}>{children}</h3>,
-        h4: ({ children }) => <h4 style={mdS.h4}>{children}</h4>,
-        h5: ({ children }) => <h5 style={mdS.h5}>{children}</h5>,
-        h6: ({ children }) => <h6 style={mdS.h6}>{children}</h6>,
-        p: ({ children }) => <p style={mdS.p}>{children}</p>,
-        code: ({ className, children }) => {
-          const isBlock = className?.includes('language-');
-          if (isBlock) return <code className={className} style={mdS.codeBlock}>{children}</code>;
-          return <code style={mdS.codeInline}>{children}</code>;
-        },
-        pre: ({ children }) => <pre style={mdS.pre}>{children}</pre>,
-        a: ({ href, children }) => <a href={href} style={mdS.a} target="_blank" rel="noopener noreferrer">{children}</a>,
-        blockquote: ({ children }) => <blockquote style={mdS.blockquote}>{children}</blockquote>,
-        ul: ({ children }) => <ul style={mdS.ul}>{children}</ul>,
-        ol: ({ children }) => <ol style={mdS.ol}>{children}</ol>,
-        li: ({ children }) => <li style={mdS.li}>{children}</li>,
-        table: ({ children }) => <table style={mdS.table}>{children}</table>,
-        th: ({ children }) => <th style={mdS.th}>{children}</th>,
-        td: ({ children }) => <td style={mdS.td}>{children}</td>,
-        hr: () => <hr style={mdS.hr} />,
-        strong: ({ children }) => <strong style={{ fontWeight: 700, color: C.inkMuted }}>{children}</strong>,
-        em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
-      }}
-    >
-      {content}
-    </ReactMarkdown>
+    <div data-markdown-content>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ children }) => <h1 style={mdS.h1}>{children}</h1>,
+          h2: ({ children }) => <h2 style={mdS.h2}>{children}</h2>,
+          h3: ({ children }) => <h3 style={mdS.h3}>{children}</h3>,
+          h4: ({ children }) => <h4 style={mdS.h4}>{children}</h4>,
+          h5: ({ children }) => <h5 style={mdS.h5}>{children}</h5>,
+          h6: ({ children }) => <h6 style={mdS.h6}>{children}</h6>,
+          p: ({ children }) => <p style={mdS.p}>{children}</p>,
+          code: ({ className, children }) => {
+            const isBlock = className?.includes('language-');
+            if (isBlock) return <code className={className} style={mdS.codeBlock}>{children}</code>;
+            return <code style={mdS.codeInline}>{children}</code>;
+          },
+          pre: ({ children }) => <pre style={mdS.pre}>{children}</pre>,
+          a: ({ href, children }) => <a href={href} style={mdS.a} target="_blank" rel="noopener noreferrer">{children}</a>,
+          blockquote: ({ children }) => <blockquote style={mdS.blockquote}>{children}</blockquote>,
+          ul: ({ children }) => <ul style={mdS.ul}>{children}</ul>,
+          ol: ({ children }) => <ol style={mdS.ol}>{children}</ol>,
+          li: ({ children }) => <li style={mdS.li}>{children}</li>,
+          input: ({ checked, ...rest }) => {
+            const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+              if (!onCheckboxToggle) return;
+              const target = e.target;
+              const container = target.closest('[data-markdown-content]');
+              if (!container) return;
+              const allCheckboxes = Array.from(container.querySelectorAll('input[type="checkbox"]'));
+              const index = allCheckboxes.indexOf(target);
+              if (index >= 0) onCheckboxToggle(index);
+            };
+            return (
+              <input
+                type="checkbox"
+                checked={checked}
+                {...rest}
+                disabled={!onCheckboxToggle}
+                onChange={handleChange}
+                style={{
+                  accentColor: C.primary,
+                  cursor: onCheckboxToggle ? 'pointer' : 'default',
+                  width: 16,
+                  height: 16,
+                  marginRight: 6,
+                  verticalAlign: 'middle',
+                }}
+              />
+            );
+          },
+          table: ({ children }) => <table style={mdS.table}>{children}</table>,
+          th: ({ children }) => <th style={mdS.th}>{children}</th>,
+          td: ({ children }) => <td style={mdS.td}>{children}</td>,
+          hr: () => <hr style={mdS.hr} />,
+          strong: ({ children }) => <strong style={{ fontWeight: 700, color: C.inkMuted }}>{children}</strong>,
+          em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
   );
 }
 
@@ -465,6 +495,28 @@ export function NotesPage() {
     setIsEditing(false);
   }, [navigate]);
 
+  const handleCheckboxToggle = useCallback((checkboxIndex: number) => {
+    if (!selectedNote || !noteId) return;
+    const content = selectedNote.content;
+    const regex = /([-*+]\s)\[([ xX])\]/g;
+    let match: RegExpExecArray | null;
+    let count = 0;
+    let newContent = content;
+    while ((match = regex.exec(content)) !== null) {
+      if (count === checkboxIndex) {
+        const isChecked = match[2].toLowerCase() === 'x';
+        const replacement = isChecked ? `${match[1]}[ ]` : `${match[1]}[x]`;
+        newContent = content.slice(0, match.index) + replacement + content.slice(match.index + match[0].length);
+        break;
+      }
+      count++;
+    }
+    if (newContent !== content) {
+      setNotes(prev => prev.map(n => n.id === noteId ? { ...n, content: newContent } : n));
+      scheduleSave(noteId, { content: newContent });
+    }
+  }, [selectedNote, noteId, scheduleSave]);
+
   const taggedUserNames = (() => {
     if (!selectedNote) return [];
     const ids = parseJsonArray(selectedNote.taggedUserIds);
@@ -746,7 +798,10 @@ export function NotesPage() {
               </div>
 
               <div style={s.viewContent}>
-                <MarkdownRenderer content={selectedNote.content || '*No content*'} />
+                <MarkdownRenderer
+                  content={selectedNote.content || '*No content*'}
+                  onCheckboxToggle={handleCheckboxToggle}
+                />
               </div>
 
               {viewIssueDetails.length > 0 && (

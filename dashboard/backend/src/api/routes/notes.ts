@@ -58,6 +58,22 @@ router.post('/', async (req, res) => {
   }
 });
 
+router.get('/:noteId', async (req, res) => {
+  try {
+    const { noteId } = req.params;
+    const note = await prisma.note.findUnique({ where: { id: noteId } });
+    if (!note) {
+      res.status(404).json({ error: 'Note not found' });
+      return;
+    }
+    res.json({ note });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('Note fetch failed:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.patch('/:noteId', async (req, res) => {
   try {
     const { noteId } = req.params;

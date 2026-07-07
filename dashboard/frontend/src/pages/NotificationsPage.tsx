@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Bell } from 'lucide-react';
 import {
   fetchNotifications, markNotificationRead, fetchIssueById, fetchProject, fetchAppConfig,
+  fetchNote,
   type ActivityNotification,
 } from '../api/client';
 import { BackButton } from '../components/BackButton';
 import { C, R, font } from '../theme';
 
 export function NotificationsPage() {
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState<ActivityNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [workspaceName, setWorkspaceName] = useState('');
   const [issueDetails, setIssueDetails] = useState<Map<string, { itemNo: string; projNo: string }>>(new Map());
+  const [noteDetails, setNoteDetails] = useState<Map<string, string>>(new Map());
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -57,6 +61,32 @@ export function NotificationsPage() {
       setIssueDetails(details);
     };
     fetchDetails();
+  }, [notifications]);
+
+  useEffect(() => {
+    if (notifications.length === 0) return;
+    const noteNotifs = notifications.filter(n => n.noteId && !noteDetails.has(n.noteId));
+    if (noteNotifs.length === 0) return;
+    const fetchNoteTitles = async () => {
+      const results = await Promise.all(
+        [...new Set(noteNotifs.map(n => n.noteId!))].map(async (noteId) => {
+          try {
+            const note = await fetchNote(noteId);
+            return { noteId, title: note.title };
+          } catch {
+            return null;
+          }
+        })
+      );
+      setNoteDetails(prev => {
+        const next = new Map(prev);
+        for (const r of results) {
+          if (r) next.set(r.noteId, r.title);
+        }
+        return next;
+      });
+    };
+    fetchNoteTitles();
   }, [notifications]);
 
   const handleMarkRead = useCallback(async (notificationId: string) => {
@@ -113,7 +143,9 @@ export function NotificationsPage() {
               {notifications.map(notif => {
                 const isUnread = !notif.read && !readIds.has(notif.id);
                 const isStatusChange = notif.type === 'status_change' || !notif.type;
+                const isNoteNotif = !!notif.noteId;
                 const issueDetail = isStatusChange ? issueDetails.get(notif.issueId) : null;
+                const noteTitle = isNoteNotif && notif.noteId ? noteDetails.get(notif.noteId) : null;
                 const zohoUrl = workspaceName && issueDetail?.projNo && issueDetail?.itemNo
                   ? `https://sprints.zoho.in/workspace/${workspaceName}#P${issueDetail.projNo}/itemdetails/I${issueDetail.itemNo}`
                   : null;
@@ -124,7 +156,12 @@ export function NotificationsPage() {
                       ...s.item,
                       backgroundColor: isUnread ? `${C.primaryHover}26` : 'transparent',
                     }}
-                    onClick={() => isUnread && handleMarkRead(notif.id)}
+                    onClick={() => {
+                      if (isUnread) handleMarkRead(notif.id);
+                      if (isNoteNotif && notif.noteId) {
+                        navigate(`/notes/${notif.noteId}`);
+                      }
+                    }}
                   >
                     <div style={s.itemContent}>
                       <div style={s.itemText}>
@@ -142,9 +179,9 @@ export function NotificationsPage() {
                             {' '}status changed: <strong>{notif.oldStatus}</strong> → <strong>{notif.newStatus}</strong>
                           </>
                         ) : notif.type === 'deadline_reminder' ? (
-                          <>Deadline reminder: note deadline is tomorrow</>
+                          <>Deadline reminder: <strong>{noteTitle ?? 'Note'}</strong> — deadline is tomorrow</>
                         ) : notif.type === 'deadline_day_of' ? (
-                          <>Deadline today: note deadline is due today</>
+                          <>Deadline today: <strong>{noteTitle ?? 'Note'}</strong> — due today</>
                         ) : (
                           <>Notification</>
                         )}

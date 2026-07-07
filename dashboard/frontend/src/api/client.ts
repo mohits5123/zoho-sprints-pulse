@@ -1093,6 +1093,17 @@ export async function fetchNotes(userId?: string, state?: string): Promise<{ not
 }
 
 /**
+ * Fetch a single note by ID.
+ *
+ * @param noteId - The note UUID.
+ * @returns The note entry.
+ */
+export async function fetchNote(noteId: string): Promise<NoteEntry> {
+  const res = await apiClient.get<{ note: NoteEntry }>(`/notes/${noteId}`);
+  return res.data.note;
+}
+
+/**
  * Create a new note.
  *
  * @param data - Object containing userId and optional title, content, issueIds, taggedUserIds.
