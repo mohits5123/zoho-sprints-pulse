@@ -1,87 +1,39 @@
 import React, { useEffect, useState } from 'react';
 import { fetchIssues, fetchIssuesKanban, type UserLoadStat } from '../api/client';
 import { roleColor } from './UserAvatar';
+import { BarGraph } from './BarGraph';
+import { C, R, font, groupColors } from '../theme';
 
-/**
- * Extracts initials from a full name (max 2 characters)
- * @param name Full name string
- * @example initials('John Doe') → 'JD'
- */
 function initials(name: string) {
   return name.split(' ').map((w) => w[0] ?? '').join('').slice(0, 2).toUpperCase();
 }
 
-/**
- * Status indicator dot with count and label
- * Renders a small colored circle alongside a numeric count and tooltip label.
- * Used to display per-status issue counts in the stale issues table.
- * @param color Hex color string for the dot indicator
- * @param count Number of items in this status
- * @param label Status label shown in tooltip
- */
 function StatusDot({ color, count, label }: { color: string; count: number; label: string }) {
   return (
     <span title={`${count} ${label}`} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
       <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: color, flexShrink: 0 }} />
-      <span style={{ fontSize: 11, color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>{count}</span>
+      <span style={{ fontSize: 12, color: C.inkSubtle, fontVariantNumeric: 'tabular-nums', fontFamily: font.text }}>{count}</span>
     </span>
   );
 }
 
-/**
- * Props for UserStaleCard component
- * Displays stale issues assigned to users with status breakdown visualization.
- *
- * Supports two board modes:
- * - Kanban (`isKanban=true`): Only counts 'todo' and 'doing' statuses (active work)
- * - Scrum (`isKanban=false`): Counts 'todo', 'doing', and 'done' statuses (all work)
- *
- * Issues are fetched from the API, aggregated by assignee, and sorted by
- * active load (todo + doing) descending.
- */
 interface UserStaleCardProps {
-  projectId:     string;                    // Unique identifier for the project
-  sprintId:      string;                    // Unique identifier for the sprint
-  staleDays?:    number | null;             // Number of days to consider an issue stale (default: 7)
-  watchedStates?: string[];                 // Optional filter for specific Zoho status names
-  onUserClick?:  (userId: string, userName: string) => void; // Callback when user row is clicked
-  onStaleClick?: () => void;                // Callback when stale badge is clicked
-  isKanban?:     boolean;                   // True for Kanban boards, false for Scrum boards
-  style?:        React.CSSProperties;       // Optional inline style overrides
+  projectId:     string;
+  sprintId:      string;
+  staleDays?:    number | null;
+  watchedStates?: string[];
+  onUserClick?:  (userId: string, userName: string) => void;
+  onStaleClick?: () => void;
+  isKanban?:     boolean;
+  style?:        React.CSSProperties;
 }
 
-/**
- * Extended user data with issue counts per status group.
- * Combines UserLoadStat (from API) with aggregated issue counts
- * for each status group (todo/doing/done).
- *
- * The `stale` count tracks how many of the user's issues are stale,
- * though it is not directly displayed in the card.
- */
 type StaleUser = UserLoadStat & {
-  todo: number;   // Count of issues in 'todo' status group
-  doing: number;  // Count of issues in 'doing' status group
-  done: number;   // Count of issues in 'done' status group
+  todo: number;
+  doing: number;
+  done: number;
 };
 
-/**
- * Individual user row in the stale issues table.
- * Displays user info (avatar + name), a stacked bar visualization of
- * issue distribution across status groups, and per-status dot indicators.
- *
- * The total count used for the bar width depends on board type:
- * - Kanban: only `todo + doing` (active work)
- * - Scrum: `todo + doing + done` (all work)
- *
- * @param user User data with issue counts per status group
- * @param rank User's rank in sorted list (1-based index)
- * @param onUserClick Callback invoked when row is clicked
- * @param isKanban Whether this is a Kanban board (affects total calculation)
- * @param showTodo Whether to show 'todo' status indicators
- * @param showDoing Whether to show 'doing' status indicators
- * @param showDone Whether to show 'done' status indicators
- * @example <StaleRow user={user} rank={1} showTodo={true} showDoing={true} showDone={false} />
- */
 function StaleRow({ user, rank, onUserClick, isKanban, showTodo, showDoing, showDone }: {
   user:        StaleUser;
   rank:        number;
@@ -95,8 +47,6 @@ function StaleRow({ user, rank, onUserClick, isKanban, showTodo, showDoing, show
   const doing = user.doing ?? 0;
   const done  = user.done  ?? 0;
   
-  // Calculate total for the bar width: Kanban only counts active work (todo+doing),
-  // Scrum counts all statuses including done
   const total = isKanban ? (todo + doing) : (todo + doing + done);
   
   if (total === 0) return null;
@@ -109,27 +59,25 @@ function StaleRow({ user, rank, onUserClick, isKanban, showTodo, showDoing, show
         alignItems: 'center',
         gap: 10,
         padding: '6px 8px',
-        borderRadius: 6,
+        borderRadius: R.sm,
         cursor: 'pointer',
         backgroundColor: 'transparent',
-        borderBottom: '1px solid #1e293b',
+        borderBottom: `1px solid ${C.hairline}`,
         margin: '0 -8px',
       }}
       onClick={() => onUserClick?.(String(user.id), user.name)}
-      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#263148'}
+      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = C.surface2}
       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
     >
-      {/* Rank */}
-      <span style={{ fontSize: 11, color: '#475569', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+      <span style={{ fontSize: 12, color: C.inkTertiary, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontFamily: font.text }}>
         {rank}
       </span>
 
-      {/* Avatar — circular, role-colored */}
       <div
         style={{
           width: 26, height: 26, borderRadius: '50%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 9, fontWeight: 700, color: '#fff',
+          fontSize: 9, fontWeight: 600, color: '#fff',
           backgroundColor: roleColor(user.role), flexShrink: 0,
         }}
         title={user.role}
@@ -137,30 +85,35 @@ function StaleRow({ user, rank, onUserClick, isKanban, showTodo, showDoing, show
         {initials(user.name)}
       </div>
 
-      {/* Name + stacked bar */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, overflow: 'hidden' }}>
-        <span style={{
-          fontSize: 12, color: '#e2e8f0', fontWeight: 500,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {user.name}
-        </span>
-        <div style={{ height: 4, borderRadius: 2, backgroundColor: '#0f172a', overflow: 'hidden', display: 'flex' }}>
-          {showTodo && <div style={{ width: `${(todo  / total) * 100}%`, backgroundColor: '#64748b', transition: 'width 0.4s' }} />}
-          {showDoing && <div style={{ width: `${(doing / total) * 100}%`, backgroundColor: '#3b82f6', transition: 'width 0.4s' }} />}
-          {showDone && <div style={{ width: `${(done  / total) * 100}%`, backgroundColor: '#22c55e', transition: 'width 0.4s' }} />}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, overflow: 'hidden' }}>
+          <span style={{
+            fontSize: 14, color: C.inkMuted, fontWeight: 400,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            fontFamily: font.text,
+          }}>
+            {user.name}
+          </span>
+          <BarGraph
+            segments={[
+              ...(showTodo ? [{ value: todo, color: groupColors.todo }] : []),
+              ...(showDoing ? [{ value: doing, color: groupColors.doing }] : []),
+              ...(showDone ? [{ value: done, color: groupColors.done }] : []),
+            ]}
+            height={6}
+            borderRadius={2}
+            gap={0}
+          />
         </div>
-      </div>
 
-      {/* Status dots + total */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        {showTodo && <StatusDot color="#64748b" count={todo} label="todo"        />}
-        {showDoing && <StatusDot color="#3b82f6" count={doing} label="in progress" />}
-        {showDone && <StatusDot color="#22c55e" count={done}  label="done"        />}
+        {showTodo && <StatusDot color={groupColors.todo} count={todo} label="todo"        />}
+        {showDoing && <StatusDot color={groupColors.doing} count={doing} label="in progress" />}
+        {showDone && <StatusDot color={groupColors.done} count={done}  label="done"        />}
         <span style={{
-          fontSize: 11, fontWeight: 700, color: '#e2e8f0',
+          fontSize: 14, fontWeight: 500, color: C.inkMuted,
           marginLeft: 4, minWidth: 18, textAlign: 'right',
           fontVariantNumeric: 'tabular-nums',
+          fontFamily: font.text,
         }}>
           {total}
         </span>
@@ -169,19 +122,6 @@ function StaleRow({ user, rank, onUserClick, isKanban, showTodo, showDoing, show
   );
 }
 
-/**
- * Renders a card displaying stale issues assigned to users
- * Fetches issues from API, aggregates by assignee, and renders sorted table
- * @param projectId Project identifier for API request
- * @param sprintId Sprint identifier for API request
- * @param staleDays Threshold days for staleness (default: 7)
- * @param watchedStates Optional Zoho status names to filter issues
- * @param onUserClick Callback triggered when user row is clicked
- * @param isKanban Mode flag: true for Kanban, false for Scrum
- * @param style Optional inline style overrides
- * @returns React element containing the stale issues card
- * @example <UserStaleCard projectId="123" sprintId="456" isKanban={true} />
- */
 export function UserStaleCard({
   projectId, sprintId, staleDays = 7,
   watchedStates, onUserClick, onStaleClick, isKanban, style,
@@ -193,10 +133,6 @@ export function UserStaleCard({
   const watchedStatesArr = watchedStates ?? [];
   const isKanbanVal = isKanban ?? false;
 
-  // Status name to status group mapping (Zoho uses custom status names).
-  // Maps Zoho status names to frontend status groups (todo/doing/done).
-  // This is used to aggregate issues into three broad categories regardless
-  // of the specific Zoho status name.
   const statusToGroup: Record<string, 'todo' | 'doing' | 'done'> = {
     'To do': 'todo',
     'In progress': 'doing',
@@ -210,33 +146,15 @@ export function UserStaleCard({
     'Reopened': 'todo',
   };
 
-  /**
-   * Checks if an issue's status is in the watched states filter
-   * Returns true if no filter is applied or status matches filter
-   * @param status The Zoho status name of the issue
-   * @returns true if status should be counted
-   */
   const isInWatchedStates = (status: string) => {
-    if (watchedStatesArr.length === 0) return true; // No filter = show all
+    if (watchedStatesArr.length === 0) return true;
     return watchedStatesArr.includes(status);
   };
 
-  /**
-   * Maps a Zoho status name to a status group (todo/doing/done)
-   * Used for grouping issues in the visualization
-   * @param status The Zoho status name of the issue
-   * @returns The status group ('todo', 'doing', or 'done')
-   * @default 'todo' if status not found in mapping
-   */
-  const getStatusGroup = (status: string): 'todo' | 'doing' | 'done' => {
-    return statusToGroup[status] || 'todo'; // Default to 'todo' if not found
+  const getStatusGroup = (status: string): ('todo' | 'doing' | 'done') => {
+    return statusToGroup[status] || 'todo';
   };
 
-  /**
-   * Effect to fetch and aggregate stale issues from API
-   * Fetches issues for the current project/sprint and aggregates by assignee
-   * Cleans up on component unmount to prevent memory leaks
-   */
   useEffect(() => {
     let mounted = true;
     setLoading(true);
@@ -246,12 +164,9 @@ export function UserStaleCard({
         const d = Number(staleDays) || 7;
         
         if (isKanbanVal) {
-          // Kanban boards: fetch issues and aggregate by assignee
-          // Only counts 'todo' and 'doing' statuses for Kanban (active work)
           const issuesRes = await fetchIssuesKanban(projectId, { stale: true, staleDays: d, watchedStates: watchedStatesArr });
           if (!mounted) return;
           
-          // Map to aggregate issues per assignee
           const assigneeMap = new Map<string, {
             id: string; name: string; role: string;
             todo: number; doing: number; done: number; stale: number;
@@ -260,13 +175,10 @@ export function UserStaleCard({
           let totalStaleCount = 0;
           
           for (const issue of issuesRes.issues) {
-            // Skip unassigned issues
             if (!issue.assignees || issue.assignees.length === 0) continue;
             
-            // Count stale issues globally
             if (issue.isStale) totalStaleCount++;
             
-            // Aggregate by assignee
             for (const user of issue.assignees) {
               if (!user || !user.id || user.id === '-1') continue;
               if (user.name === 'Unknown') continue;
@@ -285,23 +197,20 @@ export function UserStaleCard({
                 entry = assigneeMap.get(user.id)!;
               }
               
-              // Only count issues in watched states
               if (isInWatchedStates(issue.status)) {
                 const statusGroup = getStatusGroup(issue.status);
                 if (statusGroup === 'todo')  entry.todo++;
                 else if (statusGroup === 'doing') entry.doing++;
                 else if (statusGroup === 'done')  entry.done++;
                 
-                // Count stale for this assignee
                 if (issue.isStale) entry.stale++;
               }
             }
           }
           
           const usersArray = [...assigneeMap.values()];
-          // Sort by active load (todo + doing) descending, then total load as tiebreaker
           usersArray.sort((a, b) => {
-            const loadDiff = (b.todo + b.doing) - (a.todo + b.doing);
+            const loadDiff = (b.todo + b.doing) - (a.todo + a.doing);
             return loadDiff !== 0 ? loadDiff :
                    (b.todo + b.doing + b.done) - (a.todo + a.doing + a.done);
           });
@@ -309,12 +218,9 @@ export function UserStaleCard({
           setUsers(usersArray);
           setTotalStaleIssues(totalStaleCount);
         } else {
-          // Scrum boards: fetch issues and aggregate by assignee
-          // Counts 'todo', 'doing', and optionally 'done' statuses for Scrum (all work)
           const issuesRes = await fetchIssues(projectId, sprintId, { stale: true, staleDays: d, watchedStates: watchedStatesArr });
           if (!mounted) return;
           
-          // Map to aggregate issues per assignee
           const assigneeMap = new Map<string, {
             id: string; name: string; role: string;
             todo: number; doing: number; done: number; stale: number;
@@ -323,13 +229,10 @@ export function UserStaleCard({
           let totalStaleCount = 0;
           
           for (const issue of issuesRes.issues) {
-            // Skip unassigned issues
             if (!issue.assignees || issue.assignees.length === 0) continue;
             
-            // Count stale issues globally
             if (issue.isStale) totalStaleCount++;
             
-            // Aggregate by assignee
             for (const user of issue.assignees) {
               if (!user || !user.id || user.id === '-1') continue;
               if (user.name === 'Unknown') continue;
@@ -348,21 +251,18 @@ export function UserStaleCard({
                 entry = assigneeMap.get(user.id)!;
               }
               
-              // Only count issues in watched states
               if (isInWatchedStates(issue.status)) {
                 const statusGroup = getStatusGroup(issue.status);
                 if (statusGroup === 'todo')  entry.todo++;
                 else if (statusGroup === 'doing') entry.doing++;
                 else if (statusGroup === 'done')  entry.done++;
                 
-                // Count stale for this assignee
                 if (issue.isStale) entry.stale++;
               }
             }
           }
           
           const usersArray = [...assigneeMap.values()];
-          // Sort by active load (todo + doing) descending, then total load as tiebreaker
           usersArray.sort((a, b) => {
             const loadDiff = (b.todo + b.doing) - (a.todo + a.doing);
             return loadDiff !== 0 ? loadDiff : 
@@ -380,24 +280,14 @@ export function UserStaleCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, sprintId, staleDays, watchedStatesArr.join(','), isKanbanVal]);
 
-  // Determine which status groups should be visible based on watchedStates filter.
-  // Kanban boards: only show 'doing' (active work).
-  // Scrum boards: show 'todo', 'doing', and optionally 'done'.
   const hasTodo = watchedStatesArr.some(s => statusToGroup[s] === 'todo');
   const hasDoing = watchedStatesArr.some(s => statusToGroup[s] === 'doing');
   const hasDone = watchedStatesArr.some(s => statusToGroup[s] === 'done');
 
-  // Visibility rules:
-  // - showTodo: shown in Scrum when filter includes 'todo'-mapped states, or when no filter is applied
-  // - showDoing: always shown (active work is always relevant)
-  // - showDone: only in Scrum mode, when filter includes 'done'-mapped states, or when no filter is applied
   const showTodo = hasTodo || watchedStatesArr.length === 0;
   const showDoing = hasDoing || watchedStatesArr.length === 0;
   const showDone = !isKanbanVal && (hasDone || watchedStatesArr.length === 0);
 
-  // Build enriched user list with visibility flags and filter totals.
-  // filterTotal is calculated based on board type: Kanban excludes 'done',
-  // Scrum includes all statuses. Users with filterTotal === 0 are filtered out.
   const usersWithFilter = users.map(u => {
     const todo  = u.todo  ?? 0;
     const doing = u.doing ?? 0;
@@ -408,13 +298,8 @@ export function UserStaleCard({
 
   const sorted = usersWithFilter.filter(u => u.filterTotal > 0);
 
-  // Render the stale issues card with three states:
-  // - Loading: shows "Loading..." placeholder
-  // - Empty: shows "No stale issues found" when no users have issues
-  // - Data: shows table header + sorted user rows with stacked bar visualization
   return (
     <div style={{ ...s.card, ...style }}>
-      {/* Header */}
       <div style={s.headerRow}>
         <div>
           <p style={s.label}>Stale Issues by User</p>
@@ -433,7 +318,6 @@ export function UserStaleCard({
         )}
       </div>
 
-      {/* Table */}
       {loading ? (
         <div style={s.skeleton}>Loading...</div>
       ) : sorted.length === 0 ? (
@@ -464,73 +348,64 @@ export function UserStaleCard({
   );
 }
 
-/**
- * CSS styles object for the UserStaleCard component.
- * Uses dark theme colors (#1e293b background, #e2e8f0 text).
- * All styles are applied as inline CSS via the `style` prop.
- */
 const s: Record<string, React.CSSProperties> = {
-  /** Main card container with dark background and border */
   card: {
-    backgroundColor: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: 12,
-    padding: '20px 22px',
+    backgroundColor: C.surface1,
+    border: `1px solid ${C.hairline}`,
+    borderRadius: R.lg,
+    padding: '24px',
   },
-  /** Header row: title and stale badge aligned horizontally */
   headerRow: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
-  /** Title text style: uppercase, tracked-out label */
   label: {
-    margin: 0, fontSize: 11, fontWeight: 600,
-    color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em',
+    margin: 0, fontSize: 13, fontWeight: 500,
+    color: C.inkTertiary, textTransform: 'uppercase', letterSpacing: '0.4px',
+    fontFamily: font.text,
   },
-  /** Subtitle showing assignee count and ticket count */
   sub: {
-    margin: '2px 0 0', fontSize: 11, color: '#475569',
+    margin: '2px 0 0', fontSize: 12, color: C.inkTertiary, fontFamily: font.text,
   },
-  /** Warning badge (yellow) for stale count: rounded pill with amber border */
   staleBadge: {
-    fontSize: 11, fontWeight: 700, padding: '3px 8px',
-    borderRadius: 20, border: '1px solid #f59e0b66',
+    fontSize: 12, fontWeight: 400, padding: '2px 8px',
+    borderRadius: R.pill, border: '1px solid #f59e0b66',
     backgroundColor: '#f59e0b11', color: '#f59e0b',
+    fontFamily: font.text,
   },
-  /** Loading skeleton text style */
   skeleton: {
-    color: '#475569',
-    fontSize: 12,
+    color: C.inkTertiary,
+    fontSize: 14,
     padding: '16px',
+    fontFamily: font.text,
   },
-  /** Empty state text style: italic, muted */
   empty: {
-    color: '#64748b',
-    fontSize: 12,
+    color: C.inkTertiary,
+    fontSize: 14,
     fontStyle: 'italic',
     padding: '16px',
+    fontFamily: font.text,
   },
-  /** Table container for rows: vertical stack with minimal gap */
   table: {
     display: 'flex',
     flexDirection: 'column',
     gap: 2,
     minHeight: 120,
   },
-  /** Table header row with column labels (#, Assignee, Tickets) */
   tableRow: {
     display: 'grid',
     gridTemplateColumns: '18px 28px 1fr auto',
     alignItems: 'center',
     gap: 10,
     padding: '6px 8px',
-    borderBottom: '1px solid #334155',
-    color: '#64748b',
-    fontSize: 10,
-    fontWeight: 700,
+    borderBottom: `1px solid ${C.hairline}`,
+    color: C.inkTertiary,
+    fontSize: 12,
+    fontWeight: 500,
     textTransform: 'uppercase',
+    fontFamily: font.text,
   },
-  /** Individual table cell style for header labels */
   tableCell: {
-    fontSize: 10,
-    fontWeight: 700,
-    color: '#64748b',
+    fontSize: 12,
+    fontWeight: 500,
+    color: C.inkTertiary,
+    fontFamily: font.text,
   },
 };

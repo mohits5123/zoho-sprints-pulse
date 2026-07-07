@@ -6,7 +6,9 @@
 
 html, body, #root {
   height: 100%;
-  background-color: #0f172a;
+  background-color: #010102;
+  color: #f7f8f8;
+  font-family: 'Inter', -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif;
 }
 
 @keyframes syncProgressSlide {

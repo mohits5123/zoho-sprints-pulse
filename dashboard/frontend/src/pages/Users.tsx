@@ -24,16 +24,20 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, UserRole, fetchUsers, fetchTeamLoad, type TeamLoadStat } from '../api/client';
 import { UserCard } from '../components/UserCard';
+import { BackButton } from '../components/BackButton';
+import { StatPill } from '../components/StatPill';
+import { SearchBar } from '../components/SearchBar';
+import { C, R, font } from '../theme';
 
 /**
  * Role metadata mapping for color-coding and label display.
  * DEV (blue), QA (purple), PROD (orange), OTHER (gray).
  */
 const ROLE_META: Record<UserRole, { color: string; label: string }> = {
-  DEV:   { color: '#3b82f6', label: 'DEV' },
+  DEV:   { color: C.primary, label: 'DEV' },
   QA:    { color: '#a855f7', label: 'QA' },
   PROD:  { color: '#f59e0b', label: 'PROD' },
-  OTHER: { color: '#64748b', label: 'OTHER' },
+  OTHER: { color: C.inkTertiary, label: 'OTHER' },
 };
 
 /**
@@ -139,7 +143,7 @@ export function Users() {
   return (
     <div style={s.page}>
       <header style={s.header}>
-        <button style={s.back} onClick={() => navigate('/')}>← Back</button>
+        <BackButton />
         <div>
           <h1 style={s.title}>Team</h1>
           <p style={s.subtitle}>Assign local roles to your Zoho Sprints members</p>
@@ -148,25 +152,16 @@ export function Users() {
 
       {!loading && users.length > 0 && (
         <div style={s.statsRow}>
-          {/* Members summary */}
-          <div style={s.statsBlock}>
-            <span style={s.statBig}>{users.length}</span>
-            <span style={s.statLabel}>members</span>
-          </div>
-
+          <StatPill value={users.length} label="members" color={C.inkMuted} />
           <div style={s.statDivider} />
-
-          {/* Role counts */}
           {(['DEV', 'QA', 'PROD', 'OTHER'] as UserRole[]).map((role) => (
-            <div key={role} style={s.statsBlock}>
-              <span style={{ ...s.statBig, color: ROLE_META[role].color }}>
-                {roleCounts[role] ?? 0}
-              </span>
-              <span style={s.statLabel}>{role}</span>
-            </div>
+            <StatPill
+              key={role}
+              value={roleCounts[role] ?? 0}
+              label={role}
+              color={ROLE_META[role].color}
+            />
           ))}
-
-          {/* Cross-sprint WIP breakdown — shown once load data arrives */}
           {!loadFetching && loadMeta && loadMeta.sprintCount > 0 && (
             <>
               <div style={s.statDivider} />
@@ -179,17 +174,16 @@ export function Users() {
                 const wip = roleWip[role] ?? 0;
                 if (wip === 0) return null;
                 return (
-                  <div key={`wip-${role}`} style={s.statsBlock}>
-                    <span style={{ ...s.statBig, color: ROLE_META[role].color }}>{wip}</span>
-                    <span style={s.statLabel}>{role} WIP</span>
-                  </div>
+                  <StatPill
+                    key={`wip-${role}`}
+                    value={wip}
+                    label={`${role} WIP`}
+                    color={ROLE_META[role].color}
+                  />
                 );
               })}
               {totalStale > 0 && (
-                <div style={s.statsBlock}>
-                  <span style={{ ...s.statBig, color: '#f59e0b' }}>{totalStale}</span>
-                  <span style={s.statLabel}>stale</span>
-                </div>
+                <StatPill value={totalStale} label="stale" color="#f59e0b" />
               )}
             </>
           )}
@@ -207,20 +201,11 @@ export function Users() {
 
         {/* Search bar — shown once users are loaded. */}
         {!loading && users.length > 0 && (
-          <div style={s.searchWrap}>
-            
-            <input
-              style={s.searchInput}
-              type="text"
-              placeholder="Search by name…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              autoComplete="off"
-            />
-            {search && (
-              <button style={s.searchClear} onClick={() => setSearch('')} title="Clear search">x</button>
-            )}
-          </div>
+          <SearchBar
+            value={search}
+            onChange={setSearch}
+            placeholder="Search by name…"
+          />
         )}
 
         {/* User cards grid — each card shows avatar, name, role badge, WIP, and stale count. */}
@@ -255,129 +240,54 @@ export function Users() {
   );
 }
 
-/**
-  * CSS-in-JS style object for the Users page.
-  * Dark theme using slate colors (#0f172a background, #1e293b surfaces).
-  * Grid layout uses a 5-column responsive grid.
-  */
 const s: Record<string, React.CSSProperties> = {
-  /** Page container with dark background and system font stack. */
   page: {
     minHeight: '100vh',
-    backgroundColor: '#0f172a',
-    color: '#e2e8f0',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    backgroundColor: C.canvas,
+    color: C.inkMuted,
+    fontFamily: font.text,
     padding: '0 24px 48px',
   },
-  /** Header with back button and title/subtitle. */
   header: {
     display: 'flex',
     alignItems: 'center',
     gap: 20,
     padding: '32px 0 40px',
-    borderBottom: '1px solid #1e293b',
+    borderBottom: `1px solid ${C.hairline}`,
     marginBottom: 32,
   },
-  /** Back navigation button with subtle styling. */
-  back: {
-    backgroundColor: '#1e293b', border: '1px solid #334155',
-    borderRadius: 8, padding: '7px 13px',
-    color: '#94a3b8', fontSize: 13, fontWeight: 600,
-    cursor: 'pointer', userSelect: 'none' as const,
-    whiteSpace: 'nowrap' as const,
-  },
-  /** Main title for the page. */
-  title:    { margin: 0, fontSize: 28, fontWeight: 700, color: '#f1f5f9' },
-  /** Subtitle describing the page purpose. */
-  subtitle: { margin: '4px 0 0', fontSize: 14, color: '#64748b' },
-  /** Stats row container with role counts and WIP metrics. */
+  title:    { margin: 0, fontSize: 28, fontWeight: 600, color: C.inkMuted, fontFamily: font.display, letterSpacing: '-0.6px' },
+  subtitle: { margin: '4px 0 0', fontSize: 14, color: C.inkTertiary, fontFamily: font.text },
   statsRow: {
     display: 'flex',
     alignItems: 'center',
     gap: 20,
     marginBottom: 28,
-    flexWrap: 'wrap' as const,
+    flexWrap: 'wrap',
     padding: '16px 20px',
-    backgroundColor: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: 12,
+    backgroundColor: C.surface1,
+    border: `1px solid ${C.hairline}`,
+    borderRadius: R.lg,
   },
-  /** Individual stat block (e.g., member count, role count, WIP). */
   statsBlock: {
     display: 'flex',
-    flexDirection: 'column' as const,
+    flexDirection: 'column',
     alignItems: 'center',
     gap: 1,
     minWidth: 36,
   },
-  /** Large stat number with tabular nums for alignment. */
-  statBig: {
-    fontSize: 20,
-    fontWeight: 700,
-    color: '#f1f5f9',
-    lineHeight: 1.1,
-    fontVariantNumeric: 'tabular-nums' as const,
-  },
-  /** Stat label (e.g., "DEV", "WIP", "stale"). */
-  statLabel: {
-    fontSize: 10,
-    fontWeight: 600,
-    color: '#475569',
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.05em',
-    whiteSpace: 'nowrap' as const,
-  },
-  /** Meta stat text (e.g., "Across 3 sprints"). */
   statMeta: {
     fontSize: 11,
-    color: '#475569',
-    whiteSpace: 'nowrap' as const,
+    color: C.inkTertiary,
+    whiteSpace: 'nowrap',
+    fontFamily: font.text,
   },
-  /** Vertical divider between stat groups. */
-  statDivider: { width: 1, height: 32, backgroundColor: '#334155' },
-  /** Main content area. */
+  statDivider: { width: 1, height: 32, backgroundColor: C.hairline },
   main: {},
-  /** Grid container for user cards. */
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
     gap: 16,
   },
-  /** Muted text for loading/empty states. */
-  muted: { color: '#64748b', fontSize: 14 },
-  /** Search bar wrapper — sits above the grid, below the stats row. */
-  searchWrap: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 20,
-    backgroundColor: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: 10,
-    padding: '8px 12px',
-    maxWidth: '100%',
-  },
-  /** Search icon inside the bar. */
-  searchIcon: { fontSize: 14, userSelect: 'none' as const, flexShrink: 0 },
-  /** Text input for the search query. */
-  searchInput: {
-    flex: 1,
-    background: 'transparent',
-    border: 'none',
-    outline: 'none',
-    color: '#f1f5f9',
-    fontSize: 14,
-    fontFamily: 'inherit',
-  },
-  /** Clear (x) button inside the search bar. */
-  searchClear: {
-    background: 'none',
-    border: 'none',
-    color: '#475569',
-    fontSize: 12,
-    cursor: 'pointer',
-    padding: '0 2px',
-    lineHeight: 1,
-    flexShrink: 0,
-  },
+  muted: { color: C.inkTertiary, fontSize: 14, fontFamily: font.text },
 };

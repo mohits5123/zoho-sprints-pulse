@@ -28,6 +28,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Settings, ChevronDown } from 'lucide-react';
 import { fetchProject, fetchSprintEpics, fetchKanbanStaleCount, fetchPastSprintData, type EpicBreakdown, type Project, type SprintSnapshot } from '../api/client';
 import { SprintCard } from '../components/SprintCard';
 import { EpicCard } from '../components/EpicCard';
@@ -38,7 +39,9 @@ import { UserCompletionCard } from '../components/UserCompletionCard';
 import { UserStaleCard } from '../components/UserStaleCard';
 import { TicketRaiserCard } from '../components/TicketRaiserCard';
 import { StaleManagerModal, loadStaleConfig, type StaleConfig } from '../components/StaleManagerModal';
+import { BackButton } from '../components/BackButton';
 import { sortByRole } from '../components/UserAvatar';
+import { C, R, font } from '../theme';
 
 /**
  * Builds a synthetic SprintSnapshot for kanban boards.
@@ -225,7 +228,7 @@ export function BoardPage() {
       <header style={s.header}>
         <div style={s.headerLeft}>
           {/* Back button: navigate to /sprints if we arrived via a sprint link, otherwise /projects */}
-          <button style={s.back} onClick={() => navigate(searchParams.has('sprintId') ? '/sprints' : '/projects')}>Back</button>
+          <BackButton />
           <div>
             <h1 style={s.title}>{project?.name ?? '…'}</h1>
             <p style={s.subtitle}>
@@ -244,21 +247,22 @@ export function BoardPage() {
           {/* Stale settings button — opens the StaleManagerModal for configuring
               how many days and which statuses count as "stale". */}
            <button style={s.staleBtn} onClick={() => setShowStaleModal(true)} title="Configure stale ticket settings">
-             Stale: {staleDays}d
-             {watchedStates.length > 0 && (
-               <span style={s.staleBtnBadge}> · {watchedStates.length} state{watchedStates.length !== 1 ? 's' : ''}</span>
-             )}
-             <span style={s.staleBtnIcon}>Settings</span>
-           </button>
+              <Settings size={14} strokeWidth={1.5} color="#f59e0b" />
+              Stale: {staleDays}d
+              {watchedStates.length > 0 && (
+                <span style={s.staleBtnBadge}> · {watchedStates.length} state{watchedStates.length !== 1 ? 's' : ''}</span>
+              )}
+            </button>
 
 
            {/* "Switch sprint" dropdown trigger — visible only for scrum boards
                with multiple active sprints and a sprint already selected */}
-           {selectedSprint && project?.boardType !== 'kanban' && project?.activeSprints && project.activeSprints.length > 1 && (
-             <button style={s.switchBtn} onClick={() => { setSelectedSprint(null); setEpics([]); }}>
-               Switch sprint
-             </button>
-           )}
+            {selectedSprint && project?.boardType !== 'kanban' && project?.activeSprints && project.activeSprints.length > 1 && (
+              <button style={s.switchBtn} onClick={() => { setSelectedSprint(null); setEpics([]); }}>
+                Switch sprint
+                <ChevronDown size={14} strokeWidth={1.5} color={C.inkSubtle} />
+              </button>
+            )}
          </div>
        </header>
 
@@ -567,56 +571,46 @@ export function BoardPage() {
 
 // ── Inline styles ────────────────────────────────────────────────────────────
 const s: Record<string, React.CSSProperties> = {
-  // Root container: full viewport height, dark background, system font stack.
   page: {
     minHeight: '100vh',
-    backgroundColor: '#0f172a',
-    color: '#e2e8f0',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    backgroundColor: C.canvas,
+    color: C.inkMuted,
+    fontFamily: font.text,
     padding: '0 24px 48px',
   },
-  // Top header bar with back button, project title, and stale settings.
   header: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '32px 0 40px', borderBottom: '1px solid #1e293b', marginBottom: 32,
+    padding: '32px 0 40px', borderBottom: `1px solid ${C.hairline}`, marginBottom: 32,
   },
   headerLeft:  { display: 'flex', alignItems: 'center', gap: 20 },
   headerRight: { display: 'flex', alignItems: 'center', gap: 16 },
-  // Stale settings button — amber text to draw attention.
   staleBtn: {
     display: 'flex', alignItems: 'center', gap: 5,
-    backgroundColor: '#1e293b', border: '1px solid #334155',
-    borderRadius: 8, padding: '7px 13px',
+    backgroundColor: C.surface1, border: `1px solid ${C.hairline}`,
+    borderRadius: R.md, padding: '7px 13px',
     color: '#f59e0b', fontSize: 13, fontWeight: 600,
     cursor: 'pointer', userSelect: 'none' as const,
   },
-  staleBtnBadge: { color: '#94a3b8', fontWeight: 400 },
-  staleBtnIcon: { color: '#475569', fontSize: 12, marginLeft: 2 },
-  // Back navigation button — neutral styling.
-  back: {
-    backgroundColor: '#1e293b', border: '1px solid #334155',
-    borderRadius: 8, padding: '7px 13px',
-    color: '#94a3b8', fontSize: 13, fontWeight: 600,
-    cursor: 'pointer', userSelect: 'none' as const,
-  },
-  title:    { margin: 0, fontSize: 28, fontWeight: 700, color: '#f1f5f9' },
-  subtitle: { margin: '4px 0 0', fontSize: 14, color: '#64748b' },
+  staleBtnBadge: { color: C.inkSubtle, fontWeight: 400 },
+  title:    { margin: 0, fontSize: 28, fontWeight: 700, color: C.inkMuted, fontFamily: font.display, letterSpacing: '-0.6px' },
+  subtitle: { margin: '4px 0 0', fontSize: 14, color: C.inkTertiary, fontFamily: font.text },
   switchBtn: {
-    padding: '8px 16px', backgroundColor: 'transparent', color: '#94a3b8',
-    border: '1px solid #334155', borderRadius: 8, fontSize: 13, cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '8px 16px', backgroundColor: 'transparent', color: C.inkSubtle,
+    border: `1px solid ${C.hairline}`, borderRadius: R.md, fontSize: 13, cursor: 'pointer',
   },
   backlogBtn: {
-    padding: '8px 16px', backgroundColor: '#1e293b', color: '#e2e8f0',
-    border: '1px solid #334155', borderRadius: 8, fontSize: 13, fontWeight: 600,
+    padding: '8px 16px', backgroundColor: C.surface1, color: C.inkMuted,
+    border: `1px solid ${C.hairline}`, borderRadius: R.md, fontSize: 13, fontWeight: 600,
     cursor: 'pointer', userSelect: 'none' as const,
   },
-  // 4-column grid used by the main analytics cards.
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(4, 1fr)',
     gap: 20,
   },
-  // 4-column grid for epic cards (tighter gap).
   epicGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(4, 1fr)',
@@ -624,22 +618,22 @@ const s: Record<string, React.CSSProperties> = {
   },
   boardWrap: { display: 'flex', flexDirection: 'column', gap: 40 },
   section: { display: 'flex', flexDirection: 'column', gap: 16 },
-  sectionHeader: { display: 'flex', alignItems: 'baseline', gap: 10, borderBottom: '1px solid #1e293b', paddingBottom: 12 },
-  sectionTitle: { margin: 0, fontSize: 16, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' as const, letterSpacing: '0.06em' },
-  sectionMeta: { fontSize: 12, color: '#475569' },
-  pickerLabel: { color: '#64748b', fontSize: 14, marginBottom: 20 },
+  sectionHeader: { display: 'flex', alignItems: 'baseline', gap: 10, borderBottom: `1px solid ${C.hairline}`, paddingBottom: 12 },
+  sectionTitle: { margin: 0, fontSize: 16, fontWeight: 700, color: C.inkSubtle, textTransform: 'uppercase' as const, letterSpacing: '0.06em', fontFamily: font.text },
+  sectionMeta: { fontSize: 12, color: C.inkTertiary, fontFamily: font.text },
+  pickerLabel: { color: C.inkTertiary, fontSize: 14, marginBottom: 20, fontFamily: font.text },
   pickerCardBtn: {
     all: 'unset',
     cursor: 'pointer',
     display: 'block',
-    borderRadius: 12,
+    borderRadius: R.lg,
     transition: 'transform 0.1s, box-shadow 0.1s',
   },
-  muted: { color: '#64748b', fontSize: 14, margin: 0 },
-  errorText: { color: '#fca5a5', fontSize: 14, marginBottom: 16 },
+  muted: { color: C.inkTertiary, fontSize: 14, margin: 0, fontFamily: font.text },
+  errorText: { color: '#fca5a5', fontSize: 14, marginBottom: 16, fontFamily: font.text },
   loadingCard: {
-    backgroundColor: '#1e293b', border: '1px solid #334155',
-    borderRadius: 12, padding: '20px 22px',
+    backgroundColor: C.surface1, border: `1px solid ${C.hairline}`,
+    borderRadius: R.lg, padding: '20px 22px',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     minHeight: 120,
   },

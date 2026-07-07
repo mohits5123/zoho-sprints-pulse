@@ -1,98 +1,36 @@
-/**
- * Projects page component.
- *
- * Displays all projects from Zoho Sprints with their board type (scrum/kanban/other),
- * active sprints, and board item counts for kanban boards. Supports drag-and-drop reordering
- * and hiding/unhiding projects.
- *
- * Features:
- * - Lists all synced projects in display order
- * - Shows active sprints for scrum boards or kanban board item counts
- * - Allows changing board type (scrum/kanban/other) via dropdown
- * - Supports hiding projects (moves to hidden section)
- * - Drag-and-drop reordering to update display order
- * - Resync button to refresh data from Zoho
- *
- * Data flows:
- * - Projects are fetched from local SQLite (served by backend)
- * - Board type changes are persisted via API (fire-and-forget)
- * - Hidden projects are stored locally and synced on next full sync
- *
- * Navigation:
- * - Clicking a sprint row navigates to `/board/<zohoId>?sprintId=<sprintId>`
- * - Clicking the backlog row navigates to `/backlog/<zohoId>`
- * - Clicking a kanban board row navigates to `/board/<zohoId>` (no sprint filter)
- * - "Back" button navigates to `/`
- */
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { GripVertical, MoreHorizontal, ChevronDown, ChevronRight, Eye } from 'lucide-react';
 import {
   fetchProjects, syncProjects, updateProjectBoardType,
   updateProjectDisplay, reorderProjects, Project,
 } from '../api/client';
 import { SyncButton } from '../components/SyncButton';
+import { BackButton } from '../components/BackButton';
+import { StatusGroupCounts } from '../components/StatusGroupCounts';
 import { useSyncProgress } from '../contexts/SyncProgressContext';
+import { C, R, font } from '../theme';
 
-/**
- * Valid board types for projects.
- * - scrum: Traditional sprint-based workflow with active sprints
- * - kanban: Continuous flow with todo/doing/done status groups
- * - other: Non-standard board type
- */
 const BOARD_TYPES = ['scrum', 'kanban', 'other'] as const;
 type BoardType = (typeof BOARD_TYPES)[number];
 
-/**
- * Color mapping for board types.
- * Used to visually distinguish scrum (blue), kanban (green), and other (gray) boards.
- * These colors appear as dots next to the board type selector dropdown.
- */
 const BOARD_TYPE_COLORS: Record<BoardType, string> = {
-  scrum:  '#3b82f6',
-  kanban: '#10b981',
-  other:  '#64748b',
+  scrum:  C.primary,
+  kanban: C.success,
+  other:  C.inkTertiary,
 };
 
-
-/**
- * Extracts the first letter of each word from a full name and joins them,
- * producing a 1–2 character abbreviation used in project avatars.
- *
- * @param name - Full name string (e.g. "John Doe")
- * @returns Uppercase initials (e.g. "JD")
- */
 function initials(name: string) {
   return name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 }
 
-/**
- * Generates a deterministic avatar background color from a project name.
- * Uses a simple hash so the same project always gets the same color.
- *
- * @param name - Project name used as the hash seed
- * @returns One of 7 predefined hex color codes
- */
 function avatarColor(name: string) {
-  const colors = ['#6366f1', '#8b5cf6', '#ec4899', '#14b8a6', '#f59e0b', '#3b82f6', '#10b981'];
+  const colors = [C.primary, '#a855f7', '#ec4899', '#f59e0b', C.primary, C.success];
   let hash = 0;
   for (const c of name) hash = (hash * 31 + c.charCodeAt(0)) & 0xffffffff;
   return colors[Math.abs(hash) % colors.length];
 }
 
-/**
- * Hex color codes used to visually label backlog item groups in sprint rows.
- */
-const GROUP_COLORS = { todo: '#64748b', doing: '#3b82f6', done: '#22c55e' };
-
-/**
- * Computes the count of items in each status group (todo/doing/done) for a sprint.
- *
- * Parses `statusBreakdown` (status → count mapping) and `rawData` (status → group mapping)
- * from the sprint's stored JSON strings, then aggregates counts per group.
- *
- * @param sp - Sprint object containing `statusBreakdown` and `rawData` JSON strings
- * @returns Object with keys `todo`, `doing`, `done` and their respective item counts
- */
 function sprintGroupCounts(sp: { statusBreakdown: string | null; rawData: string | null }) {
   const counts = { todo: 0, doing: 0, done: 0 };
   try {
@@ -107,15 +45,6 @@ function sprintGroupCounts(sp: { statusBreakdown: string | null; rawData: string
   return counts;
 }
 
-/**
- * Computes the count of items in each status group (todo/doing/done) for a kanban board.
- *
- * Parses `statusBreakdown` (status → count mapping) and `statusGroups` (status → group mapping)
- * from the project's stored JSON strings, then aggregates counts per group.
- *
- * @param project - Project object containing `statusBreakdown` and `statusGroups` JSON strings
- * @returns Object with keys `todo`, `doing`, `done` and their respective item counts
- */
 function kanbanGroupCounts(project: Project) {
   const counts = { todo: 0, doing: 0, done: 0 };
   try {
@@ -129,18 +58,6 @@ function kanbanGroupCounts(project: Project) {
   return counts;
 }
 
-/**
- * Renders a single project card with its board type selector, sprint/board info,
- * and backlog count. Supports drag-and-drop reordering and a dropdown menu for hiding.
- *
- * Props:
- * - `project`: The project data to display
- * - `isDragging` / `isDropTarget`: Visual feedback for drag-and-drop operations
- * - `onBoardTypeChange`: Callback when the user changes the board type
- * - `onHide`: Callback when the user hides the project via the menu
- * - `onNavigate`: Callback for navigation to sprint, backlog, or board views
- * - Drag-and-drop handlers: Wired to the parent's DnD state
- */
 function ProjectCard({
   project, isDragging, isDropTarget, onBoardTypeChange, onHide, onNavigate,
   onDragStart, onDragOver, onDrop, onDragEnd,
@@ -162,7 +79,6 @@ function ProjectCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close menu when clicking outside
   useEffect(() => {
     if (!menuOpen) return;
     function handleClickOutside(e: MouseEvent) {
@@ -188,7 +104,7 @@ function ProjectCard({
     }
   }
 
-  const btColor = BOARD_TYPE_COLORS[(boardType as BoardType)] ?? '#64748b';
+  const btColor = BOARD_TYPE_COLORS[(boardType as BoardType)] ?? C.inkTertiary;
   const isMultiSprint = boardType !== 'kanban' && project.activeSprints && project.activeSprints.length > 1;
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
@@ -200,19 +116,17 @@ function ProjectCard({
       style={{
         ...s.card,
         opacity: isDragging ? 0.4 : 1,
-        outline: isDropTarget ? '2px dashed #3b82f6' : 'none',
+        outline: isDropTarget ? `2px dashed ${C.primary}` : 'none',
         cursor: 'default',
       }}
     >
       <div style={s.cardTop}>
-        {/* Avatar — not clickable */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
           <div style={{ ...s.avatar, backgroundColor: bg }}>
             {project.prefix ?? initials(project.name)}
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          {/* Drag handle */}
           <span
             draggable
             onDragStart={onDragStart}
@@ -224,9 +138,8 @@ function ProjectCard({
             }}
             title="Drag to reorder"
           >
-            ⠿
+            <GripVertical size={16} strokeWidth={1.5} color={C.inkTertiary} />
           </span>
-          {/* 3-dot menu */}
           <div ref={menuRef} style={{ position: 'relative' }}>
             <button
               style={{
@@ -238,7 +151,7 @@ function ProjectCard({
               onClick={() => setMenuOpen((o) => !o)}
               title="More options"
             >
-              ⋮
+              <MoreHorizontal size={16} strokeWidth={1.5} color={C.inkTertiary} />
             </button>
             {menuOpen && (
               <div style={s.dropdown}>
@@ -271,7 +184,6 @@ function ProjectCard({
 
       <div style={s.divider} />
 
-      {/* Sprint rows (scrum) or kanban board counts — all rows clickable */}
       {boardType === 'kanban' ? (
         <div style={s.sprintSection}>
           {project.statusBreakdown ? (() => {
@@ -288,13 +200,7 @@ function ProjectCard({
                 onMouseLeave={() => setHoveredRow(null)}
               >
                 <span style={s.sprintName}>Board items</span>
-                <span style={s.sprintCounts}>
-                  {(['todo', 'doing', 'done'] as const).map((g) => (
-                    <span key={g} style={{ ...s.sprintGroupCount, color: GROUP_COLORS[g] }}>
-                      {gc[g]}
-                    </span>
-                  ))}
-                </span>
+                <StatusGroupCounts counts={gc} />
               </div>
             );
           })() : (
@@ -321,13 +227,7 @@ function ProjectCard({
                     title={`Open ${sp.name}`}
                   >
                     <span style={s.sprintName}>{sp.name}</span>
-                    <span style={s.sprintCounts}>
-                      {(['todo', 'doing', 'done'] as const).map((g) => (
-                        <span key={g} style={{ ...s.sprintGroupCount, color: GROUP_COLORS[g] }}>
-                          {gc[g]}
-                        </span>
-                      ))}
-                    </span>
+                    <StatusGroupCounts counts={gc} />
                   </div>
                 </div>
               );
@@ -338,7 +238,6 @@ function ProjectCard({
         </div>
       )}
 
-      {/* Backlog — border separator above, inner row is hoverable */}
       <div style={s.backlogSeparator}>
          <div
            style={{
@@ -360,22 +259,6 @@ function ProjectCard({
   );
 }
 
-/**
- * Main page component that renders the full list of projects.
- *
- * Responsibilities:
- * 1. Fetches all projects and the last-sync timestamp on mount
- * 2. Provides actions for resyncing, hiding/unhiding, and reordering projects
- * 3. Renders visible projects in a responsive grid with drag-and-drop support
- * 4. Renders a collapsible "Hidden projects" section for unhiding
- * 5. Displays a footer with the last sync timestamp
- *
- * State management:
- * - `projects`: Array of all projects (visible + hidden), kept in display order
- * - `dragIndex` / `dropTarget`: Refs/state for tracking drag-and-drop position
- * - `hiddenOpen`: Controls visibility of the hidden projects section
- * - `loading` / `syncing` / `error`: UI state for async operations
- */
 export function Projects() {
   const navigate = useNavigate();
   const { setSyncActive } = useSyncProgress();
@@ -383,7 +266,6 @@ export function Projects() {
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
   const [hiddenOpen, setHiddenOpen] = useState(false);
-  // DnD state
   const dragIndex = useRef<number | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
 
@@ -394,10 +276,6 @@ export function Projects() {
       .finally(() => setLoading(false));
   }, []);
 
-  /**
-   * Triggers a full sync with Zoho Sprints, then refreshes the project list
-   * and the last-sync timestamp. Resets any previous errors.
-   */
   async function handleResync() {
     setError(null);
     setSyncActive(true);
@@ -406,18 +284,10 @@ export function Projects() {
       setProjects([...result.projects].sort((a, b) => a.displayOrder - b.displayOrder));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed');
-      setSyncActive(false); // on error deactivate immediately; no background sync to complete
+      setSyncActive(false);
     }
-    // On success: setSyncActive(false) is called by SyncProgressBar when the
-    // background sync reports inProgress=false.
   }
 
-  /**
-   * Marks a project as hidden: optimistically updates local state, then
-   * persists to the backend. Reverts on failure.
-   *
-   * @param id - The Zoho project ID to hide
-   */
   async function handleHide(id: string) {
     setProjects((prev) => prev.map((p) => p.zohoId === id ? { ...p, hidden: true } : p));
     await updateProjectDisplay(id, { hidden: true }).catch(() => {
@@ -425,12 +295,6 @@ export function Projects() {
     });
   }
 
-  /**
-   * Unhides a project: optimistically updates local state, then
-   * persists to the backend. Reverts on failure.
-   *
-   * @param id - The Zoho project ID to unhide
-   */
   async function handleUnhide(id: string) {
     setProjects((prev) => prev.map((p) => p.zohoId === id ? { ...p, hidden: false } : p));
     await updateProjectDisplay(id, { hidden: false }).catch(() => {
@@ -438,23 +302,10 @@ export function Projects() {
     });
   }
 
-  /**
-   * Records which project index is being dragged.
-   *
-   * @param _e - The drag event (unused)
-   * @param index - Index of the dragged project in the visible list
-   */
   function handleDragStart(_e: React.DragEvent, index: number) {
     dragIndex.current = index;
   }
 
-  /**
-   * Updates the drop target index while dragging. Prevents default to allow drop.
-   * Only sets a drop target if the cursor is over a different card.
-   *
-   * @param e - The drag-over event
-   * @param index - Index of the card being hovered over
-   */
   function handleDragOver(e: React.DragEvent, index: number) {
     e.preventDefault();
     if (dragIndex.current !== null && dragIndex.current !== index) {
@@ -462,13 +313,6 @@ export function Projects() {
     }
   }
 
-  /**
-   * Reorders visible projects by moving the dragged project to the drop target position.
-   * Updates `displayOrder` for each visible project and persists the new order
-   * to the backend (fire-and-forget). Hidden projects are not reordered.
-   *
-   * @param dropIndex - The index in the visible list where the dragged project should land
-   */
   function handleDrop(dropIndex: number) {
     const fromIndex = dragIndex.current;
     if (fromIndex === null || fromIndex === dropIndex) return;
@@ -480,7 +324,6 @@ export function Projects() {
       const [moved] = reordered.splice(fromIndex, 1);
       reordered.splice(dropIndex, 0, moved);
       const updated = reordered.map((p, i) => ({ ...p, displayOrder: i }));
-      // Persist to backend (fire-and-forget)
       reorderProjects(updated.map((p) => p.zohoId));
       return [...updated, ...hidden];
     });
@@ -489,9 +332,6 @@ export function Projects() {
     setDropTarget(null);
   }
 
-  /**
-   * Cleans up drag-and-drop state when the drag operation ends (drop or cancel).
-   */
   function handleDragEnd() {
     dragIndex.current = null;
     setDropTarget(null);
@@ -504,7 +344,7 @@ export function Projects() {
     <div style={s.page}>
       <header style={s.header}>
         <div style={s.headerLeft}>
-          <button style={s.back} onClick={() => navigate('/')}>Back</button>
+          <BackButton />
           <div>
             <h1 style={s.title}>Projects</h1>
             <p style={s.subtitle}>{projects.length} projects synced from Zoho Sprints</p>
@@ -550,7 +390,7 @@ export function Projects() {
       {!loading && hidden.length > 0 && (
         <div style={s.hiddenSection}>
           <button style={s.hiddenToggle} onClick={() => setHiddenOpen((o) => !o)}>
-            {hiddenOpen ? 'v' : '>'} Hidden projects ({hidden.length})
+            {hiddenOpen ? <ChevronDown size={14} strokeWidth={1.5} color={C.inkTertiary} style={{ verticalAlign: 'middle' }} /> : <ChevronRight size={14} strokeWidth={1.5} color={C.inkTertiary} style={{ verticalAlign: 'middle' }} />} Hidden projects ({hidden.length})
           </button>
           {hiddenOpen && (
             <div style={s.grid}>
@@ -562,7 +402,10 @@ export function Projects() {
                     </div>
                     <span style={s.hiddenName}>{p.name}</span>
                   </div>
-                  <button style={s.unhideBtn} onClick={() => handleUnhide(p.zohoId)}>Show</button>
+                  <button style={s.unhideBtn} onClick={() => handleUnhide(p.zohoId)}>
+                    <Eye size={12} strokeWidth={1.5} color={C.inkSubtle} style={{ verticalAlign: 'middle', marginRight: 4 }} />
+                    Show
+                  </button>
                 </div>
               ))}
             </div>
@@ -573,18 +416,12 @@ export function Projects() {
   );
 }
 
-/**
- * Inline style definitions for the Projects page.
- *
- * Organized by UI section: page layout, header, cards, sprints, hidden section.
- * All values are hardcoded for consistent dark-mode theming across the dashboard.
- */
 const s: Record<string, React.CSSProperties> = {
   page: {
     minHeight: '100vh',
-    backgroundColor: '#0f172a',
-    color: '#e2e8f0',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    backgroundColor: C.canvas,
+    color: C.inkMuted,
+    fontFamily: font.text,
     padding: '0 24px 48px',
   },
   header: {
@@ -592,27 +429,21 @@ const s: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '32px 0 40px',
-    borderBottom: '1px solid #1e293b',
+    borderBottom: `1px solid ${C.hairline}`,
     marginBottom: 32,
   },
   headerLeft: { display: 'flex', alignItems: 'center', gap: 20 },
-  back: {
-    backgroundColor: '#1e293b', border: '1px solid #334155',
-    borderRadius: 8, padding: '7px 13px',
-    color: '#94a3b8', fontSize: 13, fontWeight: 600,
-    cursor: 'pointer', userSelect: 'none' as const,
-  },
-  title:    { margin: 0, fontSize: 28, fontWeight: 700, color: '#f1f5f9' },
-  subtitle: { margin: '4px 0 0', fontSize: 14, color: '#64748b' },
+  title:    { margin: 0, fontSize: 28, fontWeight: 600, color: C.inkMuted, fontFamily: font.display, letterSpacing: '-0.6px' },
+  subtitle: { margin: '4px 0 0', fontSize: 14, color: C.inkTertiary, fontFamily: font.text },
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
     gap: 16,
   },
   card: {
-    backgroundColor: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: 12,
+    backgroundColor: C.surface1,
+    border: `1px solid ${C.hairline}`,
+    borderRadius: R.lg,
     padding: '20px 22px',
     display: 'flex',
     flexDirection: 'column',
@@ -622,8 +453,11 @@ const s: Record<string, React.CSSProperties> = {
   },
   cardTop:   { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   dragHandle: {
-    fontSize: 16, color: '#475569', cursor: 'grab', lineHeight: 1,
-    padding: '2px 4px', borderRadius: 4,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: C.inkTertiary, cursor: 'grab',
+    padding: '2px 4px', borderRadius: R.xs,
     transition: 'background-color 0.12s',
   },
   avatar: {
@@ -631,18 +465,14 @@ const s: Record<string, React.CSSProperties> = {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     fontSize: 15, fontWeight: 700, color: '#fff', flexShrink: 0,
   },
-  statusBadge: {
-    fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const,
-    letterSpacing: '0.05em', padding: '3px 8px',
-    borderRadius: 20, border: '1px solid',
-  },
-  hideBtn: {
-    display: 'none', // kept for safety, replaced by menuBtn
-  },
   menuBtn: {
-    backgroundColor: 'transparent', border: 'none', color: '#475569',
-    fontSize: 18, cursor: 'pointer', padding: '0 4px',
-    borderRadius: 4, lineHeight: 1, fontWeight: 700,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent', border: 'none', color: C.inkTertiary,
+    cursor: 'pointer',
+    padding: '2px 4px',
+    borderRadius: R.xs,
     transition: 'background-color 0.12s',
   },
   dropdown: {
@@ -650,27 +480,27 @@ const s: Record<string, React.CSSProperties> = {
     top: '100%',
     right: 0,
     marginTop: 4,
-    backgroundColor: '#1e293b',
-    border: '1px solid #334155',
-    borderRadius: 8,
+    backgroundColor: C.surface2,
+    border: `1px solid ${C.hairline}`,
+    borderRadius: R.md,
     padding: '4px',
     zIndex: 100,
     minWidth: 140,
-    boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
   },
   dropdownItem: {
     display: 'block',
     width: '100%',
     background: 'none',
     border: 'none',
-    color: '#cbd5e1',
+    color: C.inkMuted,
     fontSize: 13,
     cursor: 'pointer',
     padding: '7px 12px',
     textAlign: 'left' as const,
-    borderRadius: 6,
+    borderRadius: R.sm,
+    fontFamily: font.text,
   },
-  name:        { margin: 0, fontSize: 15, fontWeight: 600, color: '#f1f5f9', lineHeight: 1.4 },
+  name:        { margin: 0, fontSize: 15, fontWeight: 600, color: C.inkMuted, lineHeight: 1.4, fontFamily: font.display },
   boardTypeRow: { display: 'flex', alignItems: 'center', gap: 6, margin: '4px 0' },
   boardTypeDot: { width: 7, height: 7, borderRadius: '50%', flexShrink: 0 },
   select: {
@@ -678,6 +508,7 @@ const s: Record<string, React.CSSProperties> = {
     fontSize: 13, fontWeight: 600, cursor: 'pointer',
     padding: 0, outline: 'none',
     WebkitAppearance: 'none' as const,
+    fontFamily: font.text,
   },
   sprintSection: { display: 'flex', flexDirection: 'column' as const, gap: 3, marginTop: 0 },
   sprintRow: { display: 'flex', alignItems: 'center', gap: 6 },
@@ -685,39 +516,36 @@ const s: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     padding: '4px 8px',
     margin: '0 -8px',
-    borderRadius: 6,
+    borderRadius: R.sm,
     transition: 'background-color 0.12s',
   },
-  sprintRowHover: { backgroundColor: '#1e3a52' },
-  sprintDivider: { borderTop: '1px solid #1e293b', margin: '2px 8px' },
-  sprintDot: { fontSize: 12, lineHeight: 1 },
-  sprintName: { fontSize: 13, color: '#94a3b8', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const },
-  sprintCounts: { display: 'flex', gap: 5, flexShrink: 0 },
-  sprintGroupCount: { fontSize: 13, fontWeight: 600 },
-  noSprint: { margin: 0, fontSize: 12, color: '#475569', fontStyle: 'italic' as const },
-  divider: { borderTop: '1px solid #334155', margin: '6px 0 4px' },
-  backlogSeparator: { borderTop: '1px solid #334155', marginTop: 6 },
+  sprintRowHover: { backgroundColor: C.surface2 },
+  sprintDivider: { borderTop: `1px solid ${C.hairline}`, margin: '2px 8px' },
+  sprintName: { fontSize: 13, color: C.inkSubtle, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, fontFamily: font.text },
+  noSprint: { margin: 0, fontSize: 12, color: C.inkTertiary, fontStyle: 'italic' as const, fontFamily: font.text },
+  divider: { borderTop: `1px solid ${C.hairline}`, margin: '6px 0 4px' },
+  backlogSeparator: { borderTop: `1px solid ${C.hairline}`, marginTop: 6 },
   backlogRow: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     padding: '6px 8px',
     margin: '4px -8px 0',
-    borderRadius: 6,
+    borderRadius: R.sm,
     cursor: 'pointer',
     transition: 'background-color 0.12s',
   },
-  backlogLabel: { fontSize: 13, color: '#94a3b8' },
-  backlogValue: { fontSize: 13, fontWeight: 600, color: '#94a3b8' },
-  iconBtnHover: { backgroundColor: '#243248', color: '#94a3b8' },
-  // Hidden section
+  backlogLabel: { fontSize: 13, color: C.inkSubtle, fontFamily: font.text },
+  backlogValue: { fontSize: 13, fontWeight: 600, color: C.inkSubtle, fontFamily: font.text },
+  iconBtnHover: { backgroundColor: C.surface2, color: C.inkSubtle },
   hiddenSection: { marginTop: 40 },
   hiddenToggle: {
-    background: 'none', border: 'none', color: '#64748b',
+    background: 'none', border: 'none', color: C.inkTertiary,
     fontSize: 14, cursor: 'pointer', padding: '4px 0',
     marginBottom: 16, display: 'block',
+    fontFamily: font.text,
   },
   hiddenCard: {
-    backgroundColor: '#0f172a',
-    border: '1px solid #1e293b',
+    backgroundColor: C.canvas,
+    border: `1px solid ${C.hairline}`,
     borderRadius: 10,
     padding: '12px 16px',
     display: 'flex',
@@ -729,11 +557,12 @@ const s: Record<string, React.CSSProperties> = {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     fontSize: 11, fontWeight: 700, color: '#fff', flexShrink: 0,
   },
-  hiddenName: { fontSize: 13, color: '#64748b', flex: 1 },
+  hiddenName: { fontSize: 13, color: C.inkTertiary, flex: 1, fontFamily: font.text },
   unhideBtn: {
-    background: 'none', border: '1px solid #334155', color: '#94a3b8',
-    fontSize: 12, cursor: 'pointer', padding: '3px 10px', borderRadius: 6,
+    background: 'none', border: `1px solid ${C.hairline}`, color: C.inkSubtle,
+    fontSize: 12, cursor: 'pointer', padding: '3px 10px', borderRadius: R.sm,
+    fontFamily: font.text,
   },
-  muted:     { color: '#64748b', fontSize: 14 },
-  errorText: { color: '#fca5a5', fontSize: 14, marginBottom: 16 },
+  muted:     { color: C.inkTertiary, fontSize: 14, fontFamily: font.text },
+  errorText: { color: '#ef4444', fontSize: 14, marginBottom: 16, fontFamily: font.text },
 };

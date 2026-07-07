@@ -1,39 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { fetchSyncProgress } from '../api/client';
 import { useSyncProgress } from '../contexts/SyncProgressContext';
+import { C } from '../theme';
 
-/**
- * SyncProgressBar
- *
- * Displays a thin progress bar at the top of the viewport during a
- * background sync operation. Polls the server every 2 seconds for the
- * current sync status and updates the bar accordingly.
- *
- * Behaviour:
- *  - Only polls when `syncActive` is true (controlled by the parent app).
- *  - Stops polling when `syncActive` becomes false OR when the API never
- *    reports inProgress=true within 10s (safety timeout for syncs that
- *    don't call startSync on the backend).
- *  - Not visible when `inProgress` is false.
- *  - Width spans 100% of the screen.
- *  - First-time sync or requests-exceeded phase: indefinite (animated) loader.
- *  - Percentage available and not exceeded: definite loader filling up to 100%.
- *  - After reaching 100% in definite mode: switches to indefinite loader.
- *
- * Colors:
- *  - Track background: white-tinted → rgba(255,255,255,0.08)
- *  - Definite fill (light): blue with low opacity → rgba(59,130,246,0.3)
- *  - Definite overlay (dark): darker blue → #1d4ed8
- *  - Indefinite fill: darker blue → #1d4ed8
- */
-
-const DARK_BLUE = '#1d4ed8';
-const LIGHT_BLUE = 'rgba(59,130,246,0.3)';
+const PRIMARY = C.primary;
+const PRIMARY_LIGHT = `${C.primary}4d`;
 const TRACK_COLOR = 'rgba(255,255,255,0.08)';
 
 export function SyncProgressBar() {
-  // Whether the parent app has initiated a sync operation.
-  // When true, this component begins polling the backend for progress updates.
   const { syncActive, setSyncActive } = useSyncProgress();
 
   const [progress, setProgress] = useState<{
@@ -50,12 +24,7 @@ export function SyncProgressBar() {
     totalRequests: 0,
   });
 
-  // Tracks whether we've ever seen `inProgress: true` from the API. Used by
-  // the 10-second safety timeout to detect "orphaned" syncs that never call
-  // `startSync` on the backend (e.g. users sync).
   const hasSeenInProgress = useRef(false);
-  // Tracks whether the last observed state was in-progress so we can detect
-  // the transition to false and deactivate the global sync flag.
   const wasInProgress = useRef(false);
 
   const poll = useCallback(async () => {
@@ -76,8 +45,6 @@ export function SyncProgressBar() {
         hasSeenInProgress.current = true;
         wasInProgress.current = true;
       } else if (wasInProgress.current) {
-        // Transitioned from in-progress → done: deactivate the global sync flag
-        // so all SyncButtons are re-enabled automatically.
         wasInProgress.current = false;
         setSyncActive(false);
       }
@@ -86,10 +53,6 @@ export function SyncProgressBar() {
     }
   }, [setSyncActive]);
 
-  // Start polling when syncActive becomes true; stop when it becomes false.
-  // Also add a 10s safety timeout: if syncActive is true but the API never
-  // returns inProgress=true, stop polling and deactivate (handles syncs that
-  // don't call startSync on the backend).
   useEffect(() => {
     if (!syncActive) {
       return;
@@ -100,7 +63,6 @@ export function SyncProgressBar() {
 
     const timeout = setTimeout(() => {
       if (!hasSeenInProgress.current) {
-        // API never reported inProgress=true within 10s — stop polling.
         setSyncActive(false);
       }
     }, 10_000);
@@ -113,21 +75,12 @@ export function SyncProgressBar() {
     };
   }, [syncActive, poll, setSyncActive]);
 
-  // Only render when the API reports the sync is actively in progress.
-  // Returning null hides the bar entirely.
   if (!progress.inProgress) {
     return null;
   }
 
   const { percentage, isFirstSync, requestsMade, totalRequests } = progress;
 
-  /**
-   * Determine the rendering mode:
-   * - "indefinite": first sync (no percentage yet), or the request quota has
-   *   been exhausted — both cases show an animated, indeterminate loader.
-   * - "definite": percentage is available and we haven't exceeded requests —
-   *   shows a bar that fills from 0% to 100%.
-   */
   const requestsExceeded =
     totalRequests > 0 && requestsMade >= totalRequests;
   const isIndefinite = isFirstSync || requestsExceeded;
@@ -143,36 +96,22 @@ export function SyncProgressBar() {
     backgroundColor: TRACK_COLOR,
   };
 
-  /**
-   * Definite mode: lighter blue background track with darker blue fill
-   * growing proportionally to the percentage.
-   *
-   * Indefinite mode: uses a CSS `@keyframes syncLoader` animation (defined
-   * in the app's global styles) to create a sliding-bar effect. The animation
-   * keyframes must exist; otherwise this bar will appear static in indefinite
-   * mode.
-   */
   const barStyle: React.CSSProperties = isDefinite
     ? {
         height: '100%',
         width: '100%',
-        backgroundColor: LIGHT_BLUE,
+        backgroundColor: PRIMARY_LIGHT,
         position: 'relative',
         overflow: 'hidden',
       }
     : {
         height: '100%',
         width: '100%',
-        background: `no-repeat linear-gradient(${DARK_BLUE} 0 0), no-repeat linear-gradient(${DARK_BLUE} 0 0), ${LIGHT_BLUE}`,
+        background: `no-repeat linear-gradient(${PRIMARY} 0 0), no-repeat linear-gradient(${PRIMARY} 0 0), ${PRIMARY_LIGHT}`,
         backgroundSize: '60% 100%',
         animation: 'syncLoader 3s infinite',
       };
 
-  /**
-   * Darker blue overlay that fills over the lighter tint in definite mode.
-   * Width is driven by the `percentage` value from the API, with a smooth
-   * CSS transition for a polished visual effect.
-   */
   const overlayStyle: React.CSSProperties | undefined = isDefinite
     ? {
         position: 'absolute' as const,
@@ -180,7 +119,7 @@ export function SyncProgressBar() {
         left: 0,
         height: '100%',
         width: `${percentage}%`,
-        backgroundColor: DARK_BLUE,
+        backgroundColor: PRIMARY,
         transition: 'width 0.5s ease',
         borderRadius: '0 2px 2px 0',
       }

@@ -34,7 +34,7 @@ router.get('/', async (req, res) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('Deadlines list failed:', msg);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -76,7 +76,7 @@ router.post('/', async (req, res) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('Deadline create failed:', msg);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -117,7 +117,7 @@ router.patch('/:deadlineId', async (req, res) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('Deadline update failed:', msg);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -137,7 +137,7 @@ router.delete('/:deadlineId', async (req, res) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('Deadline delete failed:', msg);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -153,6 +153,60 @@ router.delete('/:deadlineId', async (req, res) => {
  *   - Returns deadlines where dueDate is between now and now + hours
  * @auth Required (OAuth token validation)
  */
+router.get('/combined', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    const now = new Date();
+
+    const deadlineWhere: Record<string, unknown> = {};
+    if (userId) deadlineWhere.userId = String(userId);
+
+    const noteWhere: Record<string, unknown> = {
+      deadline: { not: null },
+      state: 'active',
+    };
+    if (userId) noteWhere.userId = String(userId);
+
+    const [deadlines, notes] = await Promise.all([
+      prisma.deadline.findMany({
+        where: Object.keys(deadlineWhere).length > 0 ? deadlineWhere : undefined,
+        orderBy: { dueDate: 'asc' },
+      }),
+      prisma.note.findMany({
+        where: noteWhere,
+        orderBy: { deadline: 'asc' },
+      }),
+    ]);
+
+    const combined = [
+      ...deadlines.map(d => ({
+        id: d.id,
+        source: 'deadline' as const,
+        deadlineId: d.id,
+        title: d.title,
+        dueDate: d.dueDate.toISOString(),
+        completed: d.completed,
+        isOverdue: !d.completed && new Date(d.dueDate) < now,
+      })),
+      ...notes.map(n => ({
+        id: n.id,
+        source: 'note' as const,
+        noteId: n.id,
+        title: n.title,
+        dueDate: n.deadline!.toISOString(),
+        completed: false,
+        isOverdue: new Date(n.deadline!) < now,
+      })),
+    ].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+
+    res.json({ deadlines: combined });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('Combined deadlines failed:', msg);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/upcoming', async (req, res) => {
   try {
     const { userId, hours } = req.query;
@@ -178,7 +232,7 @@ router.get('/upcoming', async (req, res) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('Upcoming deadlines failed:', msg);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

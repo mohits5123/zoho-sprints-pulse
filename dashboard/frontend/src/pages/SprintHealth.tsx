@@ -20,10 +20,13 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ChevronDown, ChevronRight, Eye, X } from 'lucide-react';
 import { fetchSprints, syncSprints, fetchSyncStatus, fetchPastSprintNames, fetchPastSprintData, fetchProjects, SprintSnapshot, Project, PastSprintName, updateSprintDisplay } from '../api/client';
 import { SprintCard } from '../components/SprintCard';
 import { SyncButton } from '../components/SyncButton';
+import { BackButton } from '../components/BackButton';
 import { useSyncProgress } from '../contexts/SyncProgressContext';
+import { C, font, R, S } from '../theme';
 
 /**
  * SprintHealth page component.
@@ -258,7 +261,7 @@ export function SprintHealth() {
     <div style={s.page}>
       <header style={s.header}>
         <div style={s.headerLeft}>
-          <button style={s.back} onClick={() => navigate('/')}>Back</button>
+          <BackButton />
           <div>
             <h1 style={s.title}>Sprints</h1>
             <p style={s.subtitle}>
@@ -283,7 +286,7 @@ export function SprintHealth() {
         <div style={s.empty}>
           <p style={s.emptyTitle}>No sprint data yet</p>
           <p style={s.muted}>Make sure your Zoho credentials are set in ~/.zshrc, then click <strong>Sync</strong>.</p>
-          <SyncButton onClick={handleSync} label="Sync" style={{ marginTop: 8, padding: '12px 32px', fontSize: 15, fontWeight: 600 }} />
+          <SyncButton onClick={handleSync} label="Sync" style={{ marginTop: S.xs, padding: `${S.sm}px ${S.xxl}px`, fontSize: 15, fontWeight: 600 }} />
         </div>
       )}
 
@@ -327,7 +330,7 @@ export function SprintHealth() {
               <hr style={s.divider} />
               <div style={s.hiddenSection}>
                 <button style={s.hiddenToggle} onClick={() => setHiddenOpen((o) => !o)}>
-                  {hiddenOpen ? 'v' : '>'} Hidden sprints ({hiddenSprints.length})
+                  {hiddenOpen ? <ChevronDown size={14} strokeWidth={1.5} color={C.inkTertiary} style={{ verticalAlign: 'middle' }} /> : <ChevronRight size={14} strokeWidth={1.5} color={C.inkTertiary} style={{ verticalAlign: 'middle' }} />} Hidden sprints ({hiddenSprints.length})
                 </button>
                 {hiddenOpen && (
                   <div style={s.grid}>
@@ -339,7 +342,10 @@ export function SprintHealth() {
                           </div>
                           <span style={s.hiddenName}>{sp.name}</span>
                         </div>
-                        <button style={s.unhideBtn} onClick={() => handleUnhide(sp.zohoId)}>Show</button>
+                        <button style={s.unhideBtn} onClick={() => handleUnhide(sp.zohoId)}>
+                          <Eye size={12} strokeWidth={1.5} color={C.inkMuted} style={{ verticalAlign: 'middle', marginRight: 4 }} />
+                          Show
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -354,7 +360,9 @@ export function SprintHealth() {
           <div style={s.modal} onClick={(e) => e.stopPropagation()}>
             <div style={s.modalHeader}>
               <h2 style={s.modalTitle}>Load Past Sprints</h2>
-              <button style={s.modalClose} onClick={() => setShowPastModal(false)}>×</button>
+              <button style={s.modalClose} onClick={() => setShowPastModal(false)}>
+                <X size={20} strokeWidth={1.5} color={C.inkSubtle} />
+              </button>
             </div>
 
             {!selectedProject && (
@@ -434,7 +442,7 @@ export function SprintHealth() {
  * @returns A hex color string from the palette
  */
 function avatarColor(name: string): string {
-  const colors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#06b6d4', '#ef4444', '#6366f1'];
+  const colors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', C.success, '#06b6d4', '#ef4444', '#6366f1'];
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
@@ -469,104 +477,98 @@ function initials(name: string): string {
 const s: Record<string, React.CSSProperties> = {
   page: {
     minHeight: '100vh',
-    backgroundColor: '#0f172a',
-    color: '#e2e8f0',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-    padding: '0 24px 48px',
+    backgroundColor: C.canvas,
+    color: C.inkMuted,
+    fontFamily: font.text,
+    padding: `0 ${S.xxl}px ${S.section}px`,
   },
   header: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '32px 0 40px', borderBottom: '1px solid #1e293b', marginBottom: 32,
+    padding: `${S.xxl}px 0 ${S.xxl + S.lg}px`, borderBottom: `1px solid ${C.hairline}`, marginBottom: S.xxl,
   },
-  headerLeft: { display: 'flex', alignItems: 'center', gap: 20 },
-  headerActions: { display: 'flex', alignItems: 'center', gap: 12 },
-  back: {
-    backgroundColor: '#1e293b', border: '1px solid #334155',
-    borderRadius: 8, padding: '7px 13px',
-    color: '#94a3b8', fontSize: 13, fontWeight: 600,
-    cursor: 'pointer', userSelect: 'none' as const,
-  },
-  title:    { margin: 0, fontSize: 28, fontWeight: 700, color: '#f1f5f9' },
-  subtitle: { margin: '4px 0 0', fontSize: 14, color: '#64748b' },
+  headerLeft: { display: 'flex', alignItems: 'center', gap: S.lg },
+  headerActions: { display: 'flex', alignItems: 'center', gap: S.md },
+  title:    { margin: 0, fontSize: 28, fontWeight: 600, color: C.inkMuted, fontFamily: font.display, letterSpacing: '-0.6px' },
+  subtitle: { margin: '4px 0 0', fontSize: 14, color: C.inkSubtle },
   pastBtn: {
-    padding: '8px 20px', backgroundColor: '#1e293b', color: '#94a3b8',
-    border: '1px solid #334155', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+    padding: `${R.md}px 20px`, backgroundColor: C.surface1, color: C.inkMuted,
+    border: `1px solid ${C.hairline}`, borderRadius: R.md, fontSize: 14, fontWeight: 500, cursor: 'pointer',
   },
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-    gap: 20,
+    gap: S.lg,
   },
   empty: {
     maxWidth: 480, margin: '80px auto 0', textAlign: 'center' as const,
-    display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center',
+    display: 'flex', flexDirection: 'column', gap: S.sm, alignItems: 'center',
   },
-  emptyTitle: { fontSize: 18, fontWeight: 600, color: '#e2e8f0', margin: 0 },
-  muted: { color: '#64748b', fontSize: 14, margin: 0 },
-  errorText: { color: '#fca5a5', fontSize: 14, marginBottom: 16 },
-  sectionHeader: { fontSize: 18, fontWeight: 600, color: '#94a3b8', marginTop: 32, marginBottom: 16 },
-  divider: { border: 'none', borderTop: '1px solid #1e293b', margin: '32px 0', },
-  hiddenSection: { marginTop: 32 },
+  emptyTitle: { fontSize: 18, fontWeight: 600, color: C.inkMuted, margin: 0 },
+  muted: { color: C.inkTertiary, fontSize: 14, margin: 0 },
+  errorText: { color: C.danger, fontSize: 14, marginBottom: S.md },
+  sectionHeader: { fontSize: 18, fontWeight: 600, color: C.inkSubtle, marginTop: S.xxl, marginBottom: S.md },
+  divider: { border: 'none', borderTop: `1px solid ${C.hairline}`, margin: `${S.xxl}px 0` },
+  hiddenSection: { marginTop: S.xxl },
   hiddenToggle: {
     backgroundColor: 'transparent', border: 'none',
-    color: '#64748b', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-    padding: '8px 0',
+    color: C.inkTertiary, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+    padding: `${R.md}px 0`,
   },
   hiddenCard: {
-    backgroundColor: '#1e293b', border: '1px solid #334155',
-    borderRadius: 12, padding: '14px 18px',
-    display: 'flex', alignItems: 'center', gap: 12,
+    backgroundColor: C.surface1, border: `1px solid ${C.hairline}`,
+    borderRadius: R.lg, padding: `14px 18px`,
+    display: 'flex', alignItems: 'center', gap: S.md,
   },
   avatarSm: {
     width: 32, height: 32, borderRadius: '50%',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: 12, fontWeight: 700, color: '#fff', flexShrink: 0,
+    fontSize: 12, fontWeight: 700, color: C.canvas, flexShrink: 0,
   },
-  hiddenName: { color: '#64748b', fontSize: 13, fontWeight: 500 },
+  hiddenName: { color: C.inkSubtle, fontSize: 13, fontWeight: 500 },
   unhideBtn: {
-    padding: '5px 14px', backgroundColor: '#3b82f6', color: '#fff',
-    border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+    padding: '5px 14px', backgroundColor: C.primary, color: C.inkMuted,
+    border: 'none', borderRadius: R.sm, fontSize: 12, fontWeight: 500, cursor: 'pointer',
   },
   modalOverlay: {
-    position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)',
+    position: 'fixed', inset: 0, backgroundColor: `rgba(0,0,0,0.6)`,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     zIndex: 1000,
   },
   modal: {
-    backgroundColor: '#1e293b', borderRadius: 12, padding: 24,
+    backgroundColor: C.surface1, borderRadius: R.lg, padding: S.lg,
     minWidth: 400, maxWidth: 560, maxHeight: '80vh',
-    overflow: 'auto', border: '1px solid #334155',
+    overflow: 'auto', border: `1px solid ${C.hairline}`,
   },
   modalHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: S.lg,
   },
-  modalTitle: { margin: 0, fontSize: 20, fontWeight: 700, color: '#f1f5f9' },
+  modalTitle: { margin: 0, fontSize: 20, fontWeight: 600, color: C.inkMuted, fontFamily: font.display, letterSpacing: '-0.2px' },
   modalClose: {
-    backgroundColor: 'transparent', border: 'none', color: '#94a3b8',
-    fontSize: 24, cursor: 'pointer', lineHeight: 1, padding: '0 4px',
+    backgroundColor: 'transparent', border: 'none', color: C.inkSubtle,
+    fontSize: 24, cursor: 'pointer', lineHeight: 1, padding: `0 ${R.xs}px`,
   },
-  modalBody: { display: 'flex', flexDirection: 'column', gap: 12 },
-  projectList: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 },
+  modalBody: { display: 'flex', flexDirection: 'column', gap: S.sm },
+  projectList: { display: 'flex', flexDirection: 'column', gap: R.md, marginTop: R.md },
   projectBtn: {
-    padding: '10px 16px', backgroundColor: '#0f172a', border: '1px solid #334155',
-    borderRadius: 8, color: '#e2e8f0', fontSize: 14, cursor: 'pointer',
+    padding: `10px ${S.md}px`, backgroundColor: C.canvas, border: `1px solid ${C.hairlineStrong}`,
+    borderRadius: R.md, color: C.inkMuted, fontSize: 14, cursor: 'pointer',
     textAlign: 'left' as const,
   },
-  sprintList: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8, maxHeight: 300, overflow: 'auto' },
+  sprintList: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: R.md, maxHeight: 300, overflow: 'auto' },
   sprintCheck: {
-    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
-    backgroundColor: '#0f172a', borderRadius: 6, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', gap: 10, padding: `${R.md} 10px`,
+    backgroundColor: C.canvas, borderRadius: R.sm, cursor: 'pointer',
   },
-  sprintName: { color: '#e2e8f0', fontSize: 14, fontWeight: 500, flex: 1 },
-  sprintMeta: { color: '#64748b', fontSize: 12 },
-  modalActions: { marginTop: 16, display: 'flex', justifyContent: 'flex-end' },
+  sprintName: { color: C.inkMuted, fontSize: 14, fontWeight: 500, flex: 1 },
+  sprintMeta: { color: C.inkTertiary, fontSize: 12 },
+  modalActions: { marginTop: S.md, display: 'flex', justifyContent: 'flex-end' },
   confirmBtn: {
-    padding: '10px 24px', backgroundColor: '#3b82f6', color: '#fff',
-    border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+    padding: `10px ${S.lg}px`, backgroundColor: C.primary, color: C.inkMuted,
+    border: 'none', borderRadius: R.md, fontSize: 14, fontWeight: 500, cursor: 'pointer',
   },
   backBtn: {
-    backgroundColor: 'transparent', border: 'none', color: '#94a3b8',
-    fontSize: 13, cursor: 'pointer', padding: '4px 0', marginBottom: 8,
+    backgroundColor: 'transparent', border: 'none', color: C.inkSubtle,
+    fontSize: 13, cursor: 'pointer', padding: '4px 0', marginBottom: R.md,
   },
 };

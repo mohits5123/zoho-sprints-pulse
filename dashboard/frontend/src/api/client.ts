@@ -1048,14 +1048,17 @@ export async function fetchWatchlist(boardId?: string, userId?: string): Promise
  * Note entry — a user-created note with optional @mentions and linked issues.
  */
 export interface NoteEntry {
-  id:            string;
-  userId:        string;
-  title:         string;
-  content:       string;
-  issueIds:      string;       // JSON string of issue zohoIds
-  taggedUserIds: string;       // JSON string of user zohoIds
-  createdAt:     string;
-  updatedAt:     string;
+  id:               string;
+  userId:           string;
+  title:            string;
+  content:          string;
+  issueIds:         string;         // JSON string of issue zohoIds
+  taggedUserIds:    string;         // JSON string of user zohoIds
+  state:            string;         // "active" | "closed"
+  deadline:         string | null;  // ISO date string or null
+  deadlineNotified: boolean;
+  createdAt:        string;
+  updatedAt:        string;
 }
 
 /**
@@ -1081,11 +1084,23 @@ export interface IssueSearchResult {
  * @param userId - Optional user ID to filter by.
  * @returns Notes array with pagination metadata.
  */
-export async function fetchNotes(userId?: string): Promise<{ notes: NoteEntry[]; total: number }> {
+export async function fetchNotes(userId?: string, state?: string): Promise<{ notes: NoteEntry[]; total: number }> {
   const params: Record<string, string> = {};
   if (userId) params.userId = userId;
+  if (state) params.state = state;
   const res = await apiClient.get<{ notes: NoteEntry[]; total: number }>('/notes', { params });
   return res.data;
+}
+
+/**
+ * Fetch a single note by ID.
+ *
+ * @param noteId - The note UUID.
+ * @returns The note entry.
+ */
+export async function fetchNote(noteId: string): Promise<NoteEntry> {
+  const res = await apiClient.get<{ note: NoteEntry }>(`/notes/${noteId}`);
+  return res.data.note;
 }
 
 /**
@@ -1094,7 +1109,7 @@ export async function fetchNotes(userId?: string): Promise<{ notes: NoteEntry[];
  * @param data - Object containing userId and optional title, content, issueIds, taggedUserIds.
  * @returns The created note.
  */
-export async function createNote(data: { userId: string; title?: string; content?: string; issueIds?: string[]; taggedUserIds?: string[] }): Promise<NoteEntry> {
+export async function createNote(data: { userId: string; title?: string; content?: string; issueIds?: string[]; taggedUserIds?: string[]; state?: string; deadline?: string | null }): Promise<NoteEntry> {
   const res = await apiClient.post<{ note: NoteEntry }>('/notes', data);
   return res.data.note;
 }
@@ -1106,7 +1121,7 @@ export async function createNote(data: { userId: string; title?: string; content
  * @param data - Object containing optional title, content, issueIds, taggedUserIds.
  * @returns The updated note.
  */
-export async function updateNote(noteId: string, data: { title?: string; content?: string; issueIds?: string[]; taggedUserIds?: string[] }): Promise<NoteEntry> {
+export async function updateNote(noteId: string, data: { title?: string; content?: string; issueIds?: string[]; taggedUserIds?: string[]; state?: string; deadline?: string | null; deadlineNotified?: boolean }): Promise<NoteEntry> {
   const res = await apiClient.patch<{ note: NoteEntry }>(`/notes/${noteId}`, data);
   return res.data.note;
 }
@@ -1144,6 +1159,31 @@ export async function searchIssues(q: string, boardId?: string): Promise<{ issue
   const params: Record<string, string> = { q };
   if (boardId) params.boardId = boardId;
   const res = await apiClient.get<{ issues: IssueSearchResult[] }>('/notes/search-issues', { params });
+  return res.data;
+}
+
+export async function fetchNotesWithDeadlines(userId?: string): Promise<{ notes: NoteEntry[] }> {
+  const params: Record<string, string> = {};
+  if (userId) params.userId = userId;
+  const res = await apiClient.get<{ notes: NoteEntry[] }>('/notes/with-deadlines', { params });
+  return res.data;
+}
+
+export interface CombinedDeadline {
+  id:         string;
+  source:     'note' | 'deadline';
+  noteId?:    string;
+  deadlineId?: string;
+  title:      string;
+  dueDate:    string;
+  completed:  boolean;
+  isOverdue:  boolean;
+}
+
+export async function fetchCombinedDeadlines(userId?: string): Promise<{ deadlines: CombinedDeadline[] }> {
+  const params: Record<string, string> = {};
+  if (userId) params.userId = userId;
+  const res = await apiClient.get<{ deadlines: CombinedDeadline[] }>('/deadlines/combined', { params });
   return res.data;
 }
 
@@ -1235,8 +1275,10 @@ export async function fetchUpcomingDeadlines(userId?: string, hours: number = 24
 export interface ActivityNotification {
   id:        string;
   userId:    string;
-  issueId:   string;
-  boardId:   string;
+  type:      string;
+  issueId:   string | null;
+  boardId:   string | null;
+  noteId:    string | null;
   oldStatus: string;
   newStatus: string;
   read:      boolean;

@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { fetchIssues, fetchIssuesKanban, fetchProject, fetchAppConfig, toggleImportant, type IssueItem } from '../api/client';
 import { IssueRow } from '../components/IssueRow';
 import { BackButton } from '../components/BackButton';
+import { C, R, font } from '../theme';
 
 export function IssueListPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -115,13 +116,14 @@ export function IssueListPage() {
       {!loading && issues.length > 0 && (
         <div style={s.list}>
           <div style={s.colHeader}>
-            <span style={{ ...s.col, ...s.colId }}>ID</span>
-            <span style={{ ...s.col, flex: 1 }}>Title</span>
-            <span style={{ ...s.col, ...s.colStatus }}>Status</span>
-            <span style={{ ...s.col, ...s.colUser }}>Creator</span>
-            <span style={{ ...s.col, ...s.colUser }}>Assignee</span>
-            <span style={{ ...s.col, ...s.colDate }}>Created</span>
-            <span style={{ ...s.col, ...s.colDelay }}>Delayed</span>
+            <span style={{ width: 32 }}></span>
+            <span style={{ ...s.col, ...s.colId, ...s.colHeaderText }}>ID</span>
+            <span style={{ ...s.col, flex: 1, ...s.colHeaderText }}>Title</span>
+            <span style={{ ...s.col, ...s.colStatus, ...s.colHeaderText }}>Status</span>
+            <span style={{ ...s.col, ...s.colUser, ...s.colHeaderText }}>Creator</span>
+            <span style={{ ...s.col, ...s.colUser, ...s.colHeaderText }}>Assignee</span>
+            <span style={{ ...s.col, ...s.colDate, ...s.colHeaderText }}>Created</span>
+            <span style={{ ...s.col, ...s.colDelay, ...s.colHeaderText }}>Delayed</span>
           </div>
 
           {issues.map((issue) => (
@@ -160,31 +162,36 @@ export function IssueListPage() {
 
 const s: Record<string, React.CSSProperties> = {
   page: {
-    minHeight: '100vh', backgroundColor: '#0f172a', color: '#e2e8f0',
-    padding: '0 24px 48px', fontFamily: 'system-ui, sans-serif',
+    minHeight: '100vh', backgroundColor: C.canvas, color: C.inkMuted,
+    padding: '0 24px 48px', fontFamily: font.text,
   },
   header: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '32px 0 40px', borderBottom: '1px solid #1e293b', marginBottom: 32,
+    padding: '32px 0 40px', borderBottom: `1px solid ${C.hairline}`, marginBottom: 32,
   },
   headerLeft: { display: 'flex', alignItems: 'center', gap: 20 },
-  title:    { margin: 0, fontSize: 28, fontWeight: 700, color: '#f1f5f9' },
-  subtitle: { margin: '4px 0 0', fontSize: 14, color: '#64748b' },
-  count:    { fontSize: 13, color: '#64748b' },
-  muted:    { color: '#64748b', fontSize: 14, marginTop: 40, textAlign: 'center' as const },
-  err:      { color: '#f87171', fontSize: 14, marginTop: 40, textAlign: 'center' as const },
+  title:    { margin: 0, fontSize: 28, fontWeight: 700, color: C.inkMuted, fontFamily: font.display, letterSpacing: '-0.6px' },
+  subtitle: { margin: '4px 0 0', fontSize: 14, color: C.inkTertiary, fontFamily: font.text },
+  count:    { fontSize: 13, color: C.inkTertiary, fontFamily: font.text },
+  muted:    { color: C.inkTertiary, fontSize: 14, marginTop: 40, textAlign: 'center' as const, fontFamily: font.text },
+  err:      { color: C.danger, fontSize: 14, marginTop: 40, textAlign: 'center' as const, fontFamily: font.text },
   list: {
-    border: '1px solid #1e293b', borderRadius: 10, overflow: 'hidden',
+    border: `1px solid ${C.hairline}`, borderRadius: R.lg, overflow: 'hidden',
   },
   colHeader: {
     display: 'flex', alignItems: 'center',
-    padding: '10px 16px', backgroundColor: '#1e293b',
-    borderBottom: '1px solid #334155',
+    padding: '10px 16px', backgroundColor: C.surface1,
+    borderBottom: `1px solid ${C.hairline}`,
+  },
+  colHeaderText: {
+    fontSize: 11, fontWeight: 600, color: C.inkTertiary,
+    textTransform: 'uppercase' as const, letterSpacing: '0.05em',
+    fontFamily: font.text,
   },
   col:      { display: 'flex', alignItems: 'center', flexShrink: 0 },
   colId:    { width: 80 },
   colStatus:{ width: 140 },
   colUser:  { width: 80, justifyContent: 'center' as const },
-  colDate:  { width: 100, fontSize: 12, color: '#64748b', justifyContent: 'flex-end' as const },
+  colDate:  { width: 100, fontSize: 12, color: C.inkTertiary, justifyContent: 'flex-end' as const, fontFamily: font.text },
   colDelay: { width: 72, justifyContent: 'flex-end' as const, fontSize: 12 },
 };

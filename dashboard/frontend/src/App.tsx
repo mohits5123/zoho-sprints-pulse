@@ -23,6 +23,10 @@ import { IssueListPage } from './pages/IssueListPage';
 import { UserProfilePage } from './pages/UserProfilePage';
 import { BacklogPage } from './pages/BacklogPage';
 import { ActivityPage } from './pages/ActivityPage';
+import { NotesPage } from './pages/NotesPage';
+import { DeadlinesPage } from './pages/DeadlinesPage';
+import { WatchlistPage } from './pages/WatchlistPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 import { LastSyncedFooter } from './components/LastSyncedFooter';
 import { SyncProgressBar } from './components/SyncProgressBar';
 import { SyncProgressProvider } from './contexts/SyncProgressContext';
@@ -74,6 +78,12 @@ function AppContent() {
           <Route path="/board/:projectId/issues" element={<IssueListPage />} />
           <Route path="/backlog/:projectId" element={<BacklogPage />} />
           <Route path="/activity" element={<ActivityPage />} />
+          <Route path="/notes" element={<NotesPage />} />
+          <Route path="/notes/new" element={<NotesPage />} />
+          <Route path="/notes/:noteId" element={<NotesPage />} />
+          <Route path="/deadlines" element={<DeadlinesPage />} />
+          <Route path="/watchlist" element={<WatchlistPage />} />
+          <Route path="/notifications" element={<NotificationsPage />} />
         </Routes>
       </BrowserRouter>
       <LastSyncedFooter lastSyncedAt={lastSyncedAt} />
