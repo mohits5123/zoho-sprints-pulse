@@ -515,11 +515,11 @@ function WatchlistCard() {
             </div>
           );
         })}
-        <div style={s.cardFooter}>
-          <button style={s.viewAllBtn} onClick={() => navigate('/watchlist')}>
-            View All <ArrowRight size={12} strokeWidth={1.5} style={{ marginLeft: 4 }} />
-          </button>
-        </div>
+      </div>
+      <div style={s.cardFooter}>
+        <button style={s.viewAllBtn} onClick={() => navigate('/watchlist')}>
+          View All <ArrowRight size={12} strokeWidth={1.5} style={{ marginLeft: 4 }} />
+        </button>
       </div>
     </div>
   );
@@ -626,13 +626,13 @@ function NotesCard() {
                 </button>
               </div>
             ))}
-            <div style={s.cardFooter}>
-              <button style={s.viewAllBtn} onClick={() => navigate('/notes')}>
-                View All <ArrowRight size={12} strokeWidth={1.5} style={{ marginLeft: 4 }} />
-              </button>
-            </div>
           </div>
         )}
+      </div>
+      <div style={s.cardFooter}>
+        <button style={s.viewAllBtn} onClick={() => navigate('/notes')}>
+          View All <ArrowRight size={12} strokeWidth={1.5} style={{ marginLeft: 4 }} />
+        </button>
       </div>
     </div>
   );
@@ -886,6 +886,8 @@ const s: Record<string, React.CSSProperties> = {
     padding: '12px 20px',
     display: 'flex',
     justifyContent: 'flex-start',
+    flexShrink: 0,
+    borderTop: `1px solid ${C.hairline}`,
   },
   viewAllBtn: {
     background: 'none',
