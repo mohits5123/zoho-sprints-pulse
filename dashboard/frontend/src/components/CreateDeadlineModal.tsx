@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import {
-  fetchNotes, fetchAvailableWatchlist, batchCreateDeadlines,
-  type NoteEntry, type AvailableWatchlistItem,
+  fetchNotes, fetchAvailableWatchlist, batchCreateDeadlines, updateDeadlineGroup,
+  type NoteEntry, type AvailableWatchlistItem, type CombinedDeadline,
 } from '../api/client';
 import { C, R, font } from '../theme';
 
 interface CreateDeadlineModalProps {
   onClose: () => void;
   onCreated: () => void;
+  editDeadline?: CombinedDeadline;
 }
 
 function localToUTC(dateStr: string, timeStr: string): string {
@@ -16,7 +17,23 @@ function localToUTC(dateStr: string, timeStr: string): string {
   return localDate.toISOString();
 }
 
-export function CreateDeadlineModal({ onClose, onCreated }: CreateDeadlineModalProps) {
+function utcToLocalDate(isoStr: string): string {
+  const d = new Date(isoStr);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function utcToLocalTime(isoStr: string): string {
+  const d = new Date(isoStr);
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+export function CreateDeadlineModal({ onClose, onCreated, editDeadline }: CreateDeadlineModalProps) {
+  const isEditing = !!editDeadline;
   const [notes, setNotes] = useState<NoteEntry[]>([]);
   const [watchlistItems, setWatchlistItems] = useState<AvailableWatchlistItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,15 +51,61 @@ export function CreateDeadlineModal({ onClose, onCreated }: CreateDeadlineModalP
     let cancelled = false;
     (async () => {
       try {
+        const excludeGroupId = editDeadline?.id;
         const [{ notes: activeNotes }, { items }] = await Promise.all([
           fetchNotes(undefined, 'active'),
-          fetchAvailableWatchlist(),
+          fetchAvailableWatchlist(excludeGroupId),
         ]);
         if (!cancelled) {
-          // Filter out notes that already have a deadline
-          const notesWithoutDeadline = activeNotes.filter(note => !note.deadline);
-          setNotes(notesWithoutDeadline);
-          setWatchlistItems(items);
+          // When editing, show notes without deadline OR notes in this group
+          // When creating, show only notes without deadline
+          const filteredNotes = editDeadline
+            ? activeNotes.filter(note => !note.deadline || note.deadlineGroupId === editDeadline.id)
+            : activeNotes.filter(note => !note.deadline);
+          setNotes(filteredNotes);
+
+          // When editing, include watchlist items already in this group
+          if (editDeadline) {
+            const existingWatchlistItems: AvailableWatchlistItem[] = editDeadline.subItems
+              .filter(si => si.source === 'deadline' && si.boardId && si.issueId)
+              .map(si => ({
+                boardId: si.boardId!,
+                issueId: si.issueId!,
+                issueTitle: si.title,
+                issueItemNo: si.itemNo ?? '',
+              }));
+            // Merge with available items, avoiding duplicates
+            const existingKeys = new Set(items.map(i => `${i.boardId}|${i.issueId}`));
+            const newItems = existingWatchlistItems.filter(
+              i => !existingKeys.has(`${i.boardId}|${i.issueId}`),
+            );
+            setWatchlistItems([...items, ...newItems]);
+          } else {
+            setWatchlistItems(items);
+          }
+
+          // Pre-populate form when editing
+          if (editDeadline) {
+            setTitle(editDeadline.title);
+            setDueDate(utcToLocalDate(editDeadline.dueDate));
+            setDueTime(utcToLocalTime(editDeadline.dueDate));
+
+            // Pre-select notes that are in this group
+            const noteIdsInGroup = new Set(
+              editDeadline.subItems
+                .filter(si => si.source === 'note' && si.noteId)
+                .map(si => si.noteId!),
+            );
+            setSelectedNoteIds(noteIdsInGroup);
+
+            // Pre-select watchlist items that are in this group
+            const watchlistKeysInGroup = new Set(
+              editDeadline.subItems
+                .filter(si => si.source === 'deadline' && si.boardId && si.issueId)
+                .map(si => `${si.boardId}|${si.issueId}`),
+            );
+            setSelectedWatchlist(watchlistKeysInGroup);
+          }
         }
       } catch (err) {
         console.error('Failed to load deadline data:', err);
@@ -51,7 +114,7 @@ export function CreateDeadlineModal({ onClose, onCreated }: CreateDeadlineModalP
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [editDeadline]);
 
   const toggleNote = useCallback((id: string) => {
     setSelectedNoteIds(prev => {
@@ -84,29 +147,41 @@ export function CreateDeadlineModal({ onClose, onCreated }: CreateDeadlineModalP
       });
 
       const timeStr = dueTime || '23:59';
-      await batchCreateDeadlines({
-        dueDate: localToUTC(dueDate, timeStr),
-        title: title.trim(),
-        noteIds: selectedNoteIds.size > 0 ? Array.from(selectedNoteIds) : undefined,
-        watchlistItems: watchlistArr.length > 0 ? watchlistArr : undefined,
-        userId: 'local',
-      });
+      const utcDate = localToUTC(dueDate, timeStr);
+
+      if (editDeadline) {
+        await updateDeadlineGroup(editDeadline.id, {
+          dueDate: utcDate,
+          title: title.trim(),
+          noteIds: selectedNoteIds.size > 0 ? Array.from(selectedNoteIds) : [],
+          watchlistItems: watchlistArr.length > 0 ? watchlistArr : [],
+          userId: 'local',
+        });
+      } else {
+        await batchCreateDeadlines({
+          dueDate: utcDate,
+          title: title.trim(),
+          noteIds: selectedNoteIds.size > 0 ? Array.from(selectedNoteIds) : undefined,
+          watchlistItems: watchlistArr.length > 0 ? watchlistArr : undefined,
+          userId: 'local',
+        });
+      }
       onCreated();
       onClose();
     } catch (err) {
-      console.error('Failed to create deadlines:', err);
-      setError('Failed to create deadlines. Please try again.');
+      console.error(`Failed to ${editDeadline ? 'update' : 'create'} deadlines:`, err);
+      setError(`Failed to ${editDeadline ? 'update' : 'create'} deadlines. Please try again.`);
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, dueDate, dueTime, selectedNoteIds, selectedWatchlist, title, onCreated, onClose]);
+  }, [canSubmit, dueDate, dueTime, selectedNoteIds, selectedWatchlist, title, editDeadline, onCreated, onClose]);
 
   return (
     <div style={s.overlay} onClick={onClose}>
       <div style={s.modal} onClick={e => e.stopPropagation()}>
 
         <div style={s.header}>
-          <span style={s.title}>Create Deadline</span>
+          <span style={s.title}>{isEditing ? 'Edit Deadline' : 'Create Deadline'}</span>
           <button style={s.closeBtn} onClick={onClose}>
             <X size={18} strokeWidth={1.5} color={C.inkTertiary} />
           </button>
@@ -220,7 +295,7 @@ export function CreateDeadlineModal({ onClose, onCreated }: CreateDeadlineModalP
                   disabled={!canSubmit}
                   onClick={handleSubmit}
                 >
-                  {submitting ? 'Creating...' : 'Create'}
+                  {submitting ? (isEditing ? 'Saving...' : 'Creating...') : (isEditing ? 'Save' : 'Create')}
                 </button>
               </div>
             </div>

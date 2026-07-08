@@ -380,13 +380,21 @@ router.get('/combined', async (req, res) => {
  * GET /api/deadlines/available-watchlist — Watchlist entries not already linked to a deadline.
  * @route GET /api/deadlines/available-watchlist
  * @method GET
+ * @query excludeGroupId (optional) - DeadlineGroup UUID whose items should still appear as available (for editing)
  * @returns {Object} - { items: { boardId, issueId, issueTitle, issueItemNo }[] }
  */
 router.get('/available-watchlist', async (req, res) => {
   try {
+    const { excludeGroupId } = req.query;
     const [watchlist, deadlines] = await Promise.all([
       prisma.watchlist.findMany({ where: { userId: 'local' } }),
-      prisma.deadline.findMany({ where: { issueId: { not: null } }, select: { issueId: true } }),
+      prisma.deadline.findMany({
+        where: {
+          issueId: { not: null },
+          ...(excludeGroupId ? { deadlineGroupId: { not: String(excludeGroupId) } } : {}),
+        },
+        select: { issueId: true },
+      }),
     ]);
 
     const deadlineIssueIds = new Set(deadlines.map(d => d.issueId!));
@@ -534,6 +542,172 @@ router.get('/upcoming', async (req, res) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('Upcoming deadlines failed:', msg);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * PATCH /api/deadlines/groups/:groupId — Update a deadline group and its sub-items.
+ * @route PATCH /api/deadlines/groups/:groupId
+ * @method PATCH
+ * @params {string} groupId - DeadlineGroup UUID
+ * @body {Object} body: {
+ *   title?: string,
+ *   dueDate?: string,
+ *   noteIds?: string[],
+ *   watchlistItems?: { boardId: string; issueId: string }[],
+ *   userId?: string,
+ * }
+ * @returns {Object} - { groupId: string, updatedNotes: number, addedDeadlines: number, removedDeadlines: number }
+ */
+router.patch('/groups/:groupId', async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { title, dueDate, noteIds, watchlistItems, userId } = req.body as {
+      title?: string;
+      dueDate?: string;
+      noteIds?: string[];
+      watchlistItems?: { boardId: string; issueId: string }[];
+      userId?: string;
+    };
+
+    const group = await prisma.deadlineGroup.findUnique({ where: { id: groupId } });
+    if (!group) {
+      res.status(404).json({ error: 'Deadline group not found' });
+      return;
+    }
+
+    const parsedDate = dueDate ? new Date(dueDate) : group.dueDate;
+    if (dueDate && isNaN(parsedDate.getTime())) {
+      res.status(400).json({ error: 'Invalid dueDate' });
+      return;
+    }
+
+    const effectiveUserId = userId ?? group.userId;
+
+    // Update the group itself
+    await prisma.deadlineGroup.update({
+      where: { id: groupId },
+      data: {
+        ...(title !== undefined ? { title } : {}),
+        ...(dueDate !== undefined ? { dueDate: parsedDate } : {}),
+      },
+    });
+
+    let updatedNotes = 0;
+    let addedDeadlines = 0;
+    let removedDeadlines = 0;
+
+    // Handle notes: compare current vs desired
+    if (noteIds !== undefined) {
+      const currentNotes = await prisma.note.findMany({
+        where: { deadlineGroupId: groupId },
+        select: { id: true },
+      });
+      const currentNoteIds = new Set(currentNotes.map(n => n.id));
+      const desiredNoteIds = new Set(noteIds);
+
+      // Remove notes no longer in the group
+      const notesToRemove = Array.from(currentNoteIds).filter(id => !desiredNoteIds.has(id));
+      if (notesToRemove.length > 0) {
+        const result = await prisma.note.updateMany({
+          where: { id: { in: notesToRemove } },
+          data: { deadline: null, deadlineGroupId: null },
+        });
+        removedDeadlines += result.count;
+      }
+
+      // Add notes newly added to the group
+      const notesToAdd = noteIds.filter(id => !currentNoteIds.has(id));
+      if (notesToAdd.length > 0) {
+        const result = await prisma.note.updateMany({
+          where: { id: { in: notesToAdd }, state: 'active' },
+          data: { deadline: parsedDate, deadlineGroupId: groupId },
+        });
+        updatedNotes += result.count;
+      }
+
+      // Update dueDate on notes that remain in the group (if date changed)
+      if (dueDate !== undefined) {
+        const notesToUpdate = noteIds.filter(id => currentNoteIds.has(id));
+        if (notesToUpdate.length > 0) {
+          const result = await prisma.note.updateMany({
+            where: { id: { in: notesToUpdate } },
+            data: { deadline: parsedDate },
+          });
+          updatedNotes += result.count;
+        }
+      }
+    }
+
+    // Handle watchlist items: compare current vs desired
+    if (watchlistItems !== undefined) {
+      const currentDeadlines = await prisma.deadline.findMany({
+        where: { deadlineGroupId: groupId, issueId: { not: null } },
+        select: { id: true, boardId: true, issueId: true },
+      });
+      const currentKeys = new Set(
+        currentDeadlines.map(d => `${d.boardId}|${d.issueId}`),
+      );
+      const desiredKeys = new Set(
+        watchlistItems.map(w => `${w.boardId}|${w.issueId}`),
+      );
+
+      // Remove deadlines no longer in the group
+      const toRemove = currentDeadlines.filter(d => !desiredKeys.has(`${d.boardId}|${d.issueId}`));
+      if (toRemove.length > 0) {
+        await prisma.deadline.deleteMany({
+          where: { id: { in: toRemove.map(d => d.id) } },
+        });
+        removedDeadlines += toRemove.length;
+      }
+
+      // Add new watchlist items
+      for (const item of watchlistItems) {
+        const key = `${item.boardId}|${item.issueId}`;
+        if (!currentKeys.has(key)) {
+          await prisma.deadline.create({
+            data: {
+              userId: effectiveUserId,
+              title: title ?? group.title,
+              dueDate: parsedDate,
+              boardId: item.boardId,
+              issueId: item.issueId,
+              deadlineGroupId: groupId,
+            },
+          });
+          addedDeadlines++;
+        }
+      }
+
+      // Update dueDate and title on existing deadlines (if changed)
+      if (dueDate !== undefined || title !== undefined) {
+        const existingKeys = new Set(
+          watchlistItems
+            .map(w => `${w.boardId}|${w.issueId}`)
+            .filter(k => currentKeys.has(k)),
+        );
+        if (existingKeys.size > 0) {
+          const existingDeadlines = currentDeadlines.filter(
+            d => existingKeys.has(`${d.boardId}|${d.issueId}`),
+          );
+          if (existingDeadlines.length > 0) {
+            await prisma.deadline.updateMany({
+              where: { id: { in: existingDeadlines.map(d => d.id) } },
+              data: {
+                ...(dueDate !== undefined ? { dueDate: parsedDate } : {}),
+                ...(title !== undefined ? { title } : {}),
+              },
+            });
+          }
+        }
+      }
+    }
+
+    res.json({ groupId: group.id, updatedNotes, addedDeadlines, removedDeadlines });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('Deadline group update failed:', msg);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

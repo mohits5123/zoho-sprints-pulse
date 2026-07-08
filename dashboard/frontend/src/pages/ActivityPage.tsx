@@ -241,7 +241,9 @@ function DeadlinesCard() {
   const [deadlines, setDeadlines] = useState<CombinedDeadline[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingDeadline, setEditingDeadline] = useState<CombinedDeadline | null>(null);
   const [workspaceName, setWorkspaceName] = useState('');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchAppConfig().then(({ workspaceName: wn }) => setWorkspaceName(wn)).catch(() => {});
@@ -252,6 +254,11 @@ function DeadlinesCard() {
       const { deadlines: data } = await fetchCombinedDeadlines();
       const sorted = [...data].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
       setDeadlines(sorted.slice(0, 5));
+      // Initialize all multi-item deadlines as expanded by default (only on first load)
+      setExpandedGroups(prev => {
+        if (prev.size > 0) return prev; // Already initialized, preserve user state
+        return new Set(sorted.filter(dl => dl.subItems.length > 1).map(dl => dl.id));
+      });
     } catch (err) {
       console.error('Failed to load deadlines:', err);
     } finally {
@@ -265,6 +272,14 @@ function DeadlinesCard() {
     return () => clearInterval(interval);
   }, [loadDeadlines]);
 
+  const toggleExpand = useCallback((groupId: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId); else next.add(groupId);
+      return next;
+    });
+  }, []);
+
   return (
     <div style={s.deadlinesCard}>
       <div style={s.cardHeader}>
@@ -277,10 +292,11 @@ function DeadlinesCard() {
           Add
         </button>
       </div>
-      {showCreateModal && (
+      {(showCreateModal || editingDeadline) && (
         <CreateDeadlineModal
-          onClose={() => setShowCreateModal(false)}
+          onClose={() => { setShowCreateModal(false); setEditingDeadline(null); }}
           onCreated={() => loadDeadlines()}
+          editDeadline={editingDeadline ?? undefined}
         />
       )}
       <div style={s.cardBody}>
@@ -296,6 +312,9 @@ function DeadlinesCard() {
                   key={dl.id}
                   deadline={dl}
                   workspaceName={workspaceName}
+                  isExpanded={expandedGroups.has(dl.id)}
+                  onToggleExpand={() => toggleExpand(dl.id)}
+                  onEdit={() => setEditingDeadline(dl)}
                 />
               ))}
             </div>
@@ -393,8 +412,15 @@ function WatchlistCard() {
           return next;
         });
       }
-    } catch (err) {
-      console.error('Failed to toggle important:', err);
+    } catch (err: unknown) {
+      const message = err instanceof Error && 'response' in err
+        ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+        : undefined;
+      if (message) {
+        alert(message);
+      } else {
+        console.error('Failed to toggle important:', err);
+      }
     }
   };
 

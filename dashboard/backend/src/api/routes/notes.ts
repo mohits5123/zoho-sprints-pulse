@@ -144,6 +144,12 @@ router.patch('/:noteId', async (req, res) => {
 router.delete('/:noteId', async (req, res) => {
   try {
     const { noteId } = req.params;
+    // Check if the note has a deadline before allowing deletion
+    const note = await prisma.note.findUnique({ where: { id: noteId } });
+    if (note?.deadline) {
+      res.status(400).json({ error: 'Cannot delete a note that has a deadline. Remove the deadline first.' });
+      return;
+    }
     await prisma.note.delete({ where: { id: noteId } });
     res.json({ deleted: true });
   } catch (err) {

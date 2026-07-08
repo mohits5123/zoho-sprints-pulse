@@ -10,6 +10,7 @@ export function DeadlinesPage() {
   const [deadlines, setDeadlines] = useState<CombinedDeadline[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingDeadline, setEditingDeadline] = useState<CombinedDeadline | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [workspaceName, setWorkspaceName] = useState('');
 
@@ -22,6 +23,11 @@ export function DeadlinesPage() {
       const { deadlines: data } = await fetchCombinedDeadlines();
       const sorted = [...data].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
       setDeadlines(sorted);
+      // Initialize all multi-item deadlines as expanded by default (only on first load)
+      setExpandedGroups(prev => {
+        if (prev.size > 0) return prev; // Already initialized, preserve user state
+        return new Set(sorted.filter(dl => dl.subItems.length > 1).map(dl => dl.id));
+      });
     } catch (err) {
       console.error('Failed to load deadlines:', err);
     } finally {
@@ -69,10 +75,11 @@ export function DeadlinesPage() {
         </button>
       </header>
 
-      {showCreateModal && (
+      {(showCreateModal || editingDeadline) && (
         <CreateDeadlineModal
-          onClose={() => setShowCreateModal(false)}
+          onClose={() => { setShowCreateModal(false); setEditingDeadline(null); }}
           onCreated={() => loadDeadlines()}
+          editDeadline={editingDeadline ?? undefined}
         />
       )}
 
@@ -91,6 +98,7 @@ export function DeadlinesPage() {
                   workspaceName={workspaceName}
                   isExpanded={expandedGroups.has(dl.id)}
                   onToggleExpand={() => toggleExpand(dl.id)}
+                  onEdit={() => setEditingDeadline(dl)}
                   onDelete={() => handleDelete(dl.id)}
                 />
               ))}

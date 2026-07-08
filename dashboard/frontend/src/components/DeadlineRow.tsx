@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import { type CombinedDeadline } from '../api/client';
 import { UserAvatar } from './UserAvatar';
 import { C, R, font, groupColors } from '../theme';
@@ -9,14 +9,16 @@ interface DeadlineRowProps {
   workspaceName: string;
   isExpanded?: boolean;
   onToggleExpand?: () => void;
+  onEdit?: () => void;
   onDelete?: () => void;
 }
 
 export function DeadlineRow({
   deadline,
   workspaceName,
-  isExpanded = false,
+  isExpanded = true,
   onToggleExpand,
+  onEdit,
   onDelete,
 }: DeadlineRowProps) {
   const navigate = useNavigate();
@@ -101,6 +103,15 @@ export function DeadlineRow({
           >
             Due: {formatDueDate(deadline.dueDate)}
           </span>
+          {onEdit && (
+            <button
+              style={s.deleteBtn}
+              onClick={onEdit}
+              title="Edit deadline"
+            >
+              <Pencil size={14} strokeWidth={1.5} color={C.inkTertiary} />
+            </button>
+          )}
           {onDelete && (
             <button
               style={s.deleteBtn}

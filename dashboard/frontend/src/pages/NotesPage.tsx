@@ -500,8 +500,15 @@ export function NotesPage() {
       await deleteNote(id);
       setNotes(prev => prev.filter(n => n.id !== id));
       if (noteId === id) navigate('/notes');
-    } catch (err) {
-      console.error('Failed to delete note:', err);
+    } catch (err: unknown) {
+      const message = err instanceof Error && 'response' in err
+        ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+        : undefined;
+      if (message) {
+        alert(message);
+      } else {
+        console.error('Failed to delete note:', err);
+      }
     }
   }, [noteId, navigate]);
 

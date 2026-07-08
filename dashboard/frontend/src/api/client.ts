@@ -1056,6 +1056,7 @@ export interface NoteEntry {
   taggedUserIds:    string;         // JSON string of user zohoIds
   state:            string;         // "active" | "closed"
   deadline:         string | null;  // ISO date string or null
+  deadlineGroupId:  string | null;  // group ID if part of a grouped deadline
   deadlineNotified: boolean;
   createdAt:        string;
   updatedAt:        string;
@@ -1295,10 +1296,13 @@ export interface AvailableWatchlistItem {
 /**
  * Fetch watchlist entries that are not already part of any deadline.
  *
+ * @param excludeGroupId - Optional deadline group UUID whose items should still appear (for editing).
  * @returns Available watchlist items with issue details.
  */
-export async function fetchAvailableWatchlist(): Promise<{ items: AvailableWatchlistItem[] }> {
-  const res = await apiClient.get<{ items: AvailableWatchlistItem[] }>('/deadlines/available-watchlist');
+export async function fetchAvailableWatchlist(excludeGroupId?: string): Promise<{ items: AvailableWatchlistItem[] }> {
+  const params: Record<string, string> = {};
+  if (excludeGroupId) params.excludeGroupId = excludeGroupId;
+  const res = await apiClient.get<{ items: AvailableWatchlistItem[] }>('/deadlines/available-watchlist', { params });
   return res.data;
 }
 
@@ -1335,6 +1339,34 @@ export async function deleteDeadlineGroup(groupId: string): Promise<{
     clearedNotes: number;
     deletedDeadlines: number;
   }>(`/deadlines/groups/${groupId}`);
+  return res.data;
+}
+
+/**
+ * Update a deadline group and its sub-items.
+ *
+ * @param groupId - The deadline group UUID to update.
+ * @param data - Object containing optional title, dueDate, noteIds, watchlistItems, userId.
+ * @returns Object with update confirmation and counts.
+ */
+export async function updateDeadlineGroup(groupId: string, data: {
+  title?: string;
+  dueDate?: string;
+  noteIds?: string[];
+  watchlistItems?: { boardId: string; issueId: string }[];
+  userId?: string;
+}): Promise<{
+  groupId: string;
+  updatedNotes: number;
+  addedDeadlines: number;
+  removedDeadlines: number;
+}> {
+  const res = await apiClient.patch<{
+    groupId: string;
+    updatedNotes: number;
+    addedDeadlines: number;
+    removedDeadlines: number;
+  }>(`/deadlines/groups/${groupId}`, data);
   return res.data;
 }
 
