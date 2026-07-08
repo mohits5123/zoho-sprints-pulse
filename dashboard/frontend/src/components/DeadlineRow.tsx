@@ -265,7 +265,7 @@ const s: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    padding: '10px 20px 10px 48px',
+    padding: '10px 28px 10px 48px',
     cursor: 'pointer',
     borderBottom: `1px solid ${C.hairline}`,
     transition: 'background-color 0.1s',
@@ -287,7 +287,7 @@ const s: Record<string, React.CSSProperties> = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap' as const,
     fontFamily: font.text,
-    flex: 1,
+    flex: '0 0 50%',
     minWidth: 0,
   },
   subItemNo: {
@@ -296,14 +296,14 @@ const s: Record<string, React.CSSProperties> = {
     color: C.inkTertiary,
     fontFamily: font.mono,
     flexShrink: 0,
-    width: 50,
+    width: '6%',
   },
   subItemStatus: {
     display: 'flex',
     alignItems: 'center',
     gap: 5,
     flexShrink: 0,
-    width: 100,
+    width: '18%',
   },
   statusDot: {
     width: 7,
@@ -325,7 +325,7 @@ const s: Record<string, React.CSSProperties> = {
     gap: 3,
     flexWrap: 'wrap' as const,
     flexShrink: 0,
-    width: 60,
+    width: '15%',
     justifyContent: 'center',
   },
   subItemAge: {
@@ -333,7 +333,7 @@ const s: Record<string, React.CSSProperties> = {
     color: C.inkTertiary,
     fontFamily: font.text,
     flexShrink: 0,
-    width: 40,
+    width: '5%',
     textAlign: 'right' as const,
   },
   dash: {

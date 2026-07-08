@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Plus, Calendar, Eye, FileText, X, ArrowRight } from 'lucide-react';
+import { Bell, Plus, Calendar, Eye, FileText, ArrowRight } from 'lucide-react';
 import {
-  fetchNotes, deleteNote,
+  fetchNotes,
   fetchNotifications, markNotificationRead,
   fetchWatchlist, toggleImportant, fetchIssueById, fetchAppConfig, fetchProject,
   fetchCombinedDeadlines, fetchNote,
@@ -568,15 +568,6 @@ function NotesCard() {
     return () => { cancelled = true; };
   }, []);
 
-  const handleDeleteNote = useCallback(async (noteId: string) => {
-    try {
-      await deleteNote(noteId);
-      setNotes(prev => prev.filter(n => n.id !== noteId));
-    } catch (err) {
-      console.error('Failed to delete note:', err);
-    }
-  }, []);
-
   const relativeTime = (dateStr: string): string => {
     const now = Date.now();
     const then = new Date(dateStr).getTime();
@@ -624,13 +615,6 @@ function NotesCard() {
                 <div style={s.noteListItemMeta}>
                   <span style={s.noteListItemTime}>{relativeTime(note.updatedAt)}</span>
                 </div>
-                <button
-                  style={s.noteDeleteBtn}
-                  onClick={(e) => { e.stopPropagation(); handleDeleteNote(note.id); }}
-                  title="Delete note"
-                >
-                  <X size={16} strokeWidth={1.5} color={C.inkTertiary} />
-                </button>
               </div>
             ))}
           </div>
@@ -799,7 +783,6 @@ const s: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap' as const,
-    paddingRight: 24,
     fontFamily: font.text,
   },
   noteListItemPreview: {
@@ -818,18 +801,6 @@ const s: Record<string, React.CSSProperties> = {
   noteListItemTime: {
     fontSize: 11,
     color: C.inkTertiary,
-  },
-  noteDeleteBtn: {
-    position: 'absolute' as const,
-    top: 12,
-    right: 12,
-    background: 'none',
-    border: 'none',
-    color: C.inkTertiary,
-    fontSize: 18,
-    cursor: 'pointer',
-    padding: '0 4px',
-    lineHeight: 1,
   },
   cardFooter: {
     padding: '12px 20px',
