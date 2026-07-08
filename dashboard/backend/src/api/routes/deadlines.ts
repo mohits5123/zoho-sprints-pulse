@@ -11,6 +11,26 @@ import prisma from '../../db/client';
 const router = Router();
 
 /**
+ * Extract project number from raw Zoho data.
+ * 
+ * Parses the rawData field (which is a JSON string) to extract the projNo field.
+ * This field may be stored in either 'prop.projNo' or 'fields[index]' depending on
+ * how Zoho returns the data. Returns null if parsing fails or field is missing.
+ * 
+ * @param rawData - JSON string from Zoho project data
+ * @returns Project number as string, or null if not found
+ */
+function extractProjNo(rawData: string | null): string | null {
+  try {
+    if (!rawData) return null;
+    const rd = JSON.parse(rawData) as { fields?: unknown[]; prop?: Record<string, number> };
+    const idx = rd.prop?.projNo ?? 1;
+    const val = rd.fields?.[idx];
+    return val != null ? String(val) : null;
+  } catch { return null; }
+}
+
+/**
  * GET /api/deadlines — List deadlines, optionally filtered by user and/or board.
  * @route GET /api/deadlines?userId=<id>&boardId=<id>
  * @method GET
@@ -167,7 +187,10 @@ router.get('/combined', async (req, res) => {
     };
     if (userId) noteWhere.userId = String(userId);
 
-    const [deadlines, notes] = await Promise.all([
+    const [deadlineGroups, deadlines, notes] = await Promise.all([
+      prisma.deadlineGroup.findMany({
+        orderBy: { dueDate: 'asc' },
+      }),
       prisma.deadline.findMany({
         where: Object.keys(deadlineWhere).length > 0 ? deadlineWhere : undefined,
         orderBy: { dueDate: 'asc' },
@@ -178,31 +201,310 @@ router.get('/combined', async (req, res) => {
       }),
     ]);
 
-    const combined = [
-      ...deadlines.map(d => ({
+    // Collect all issue IDs, board IDs, and user IDs to fetch details
+    const issueIds = new Set<string>();
+    const boardIds = new Set<string>();
+    const userIds = new Set<string>();
+    for (const d of deadlines) {
+      if (d.issueId) issueIds.add(d.issueId);
+      if (d.boardId) boardIds.add(d.boardId);
+    }
+
+    // Fetch issue details and project projNo in parallel
+    const [issues, projects] = await Promise.all([
+      issueIds.size > 0
+        ? prisma.issue.findMany({
+            where: { zohoId: { in: Array.from(issueIds) } },
+            select: {
+              zohoId: true,
+              itemNo: true,
+              title: true,
+              status: true,
+              statusGroup: true,
+              assigneeIds: true,
+              createdAt: true,
+            },
+          })
+        : Promise.resolve([]),
+      boardIds.size > 0
+        ? prisma.project.findMany({
+            where: { zohoId: { in: Array.from(boardIds) } },
+            select: { zohoId: true, rawData: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    // Collect all assignee IDs from issues
+    for (const issue of issues) {
+      try {
+        const assignees = JSON.parse(issue.assigneeIds || '[]') as string[];
+        assignees.forEach(id => userIds.add(id));
+      } catch { /* ignore parse errors */ }
+    }
+
+    // Fetch user details for assignees
+    const users = userIds.size > 0
+      ? await prisma.user.findMany({
+          where: { zohoId: { in: Array.from(userIds) } },
+          select: { zohoId: true, name: true, role: true },
+        })
+      : [];
+
+    // Extract projNo from rawData for each project
+    const projectMap = new Map(projects.map(p => [p.zohoId, extractProjNo(p.rawData)]));
+    const issueMap = new Map(issues.map(i => [i.zohoId, i]));
+    const userMap = new Map(users.map(u => [u.zohoId, u]));
+
+    type SubItem = {
+      id: string;
+      source: 'note' | 'deadline';
+      noteId?: string;
+      deadlineId?: string;
+      boardId?: string | null;
+      issueId?: string | null;
+      title: string;
+      // Issue details (for ticket sub-items)
+      itemNo?: string;
+      status?: string;
+      statusGroup?: string;
+      assignees?: Array<{ id: string; name: string; role: string }>;
+      createdAt?: string | null;
+      projNo?: string;
+    };
+
+    type DeadlineGroup = {
+      id: string;
+      title: string;
+      dueDate: string;
+      isOverdue: boolean;
+      subItems: SubItem[];
+    };
+
+    const groupMap = new Map<string, DeadlineGroup>();
+
+    for (const group of deadlineGroups) {
+      groupMap.set(group.id, {
+        id: group.id,
+        title: group.title,
+        dueDate: group.dueDate.toISOString(),
+        isOverdue: group.dueDate < now,
+        subItems: [],
+      });
+    }
+
+    for (const d of deadlines) {
+      const issue = d.issueId ? issueMap.get(d.issueId) : null;
+      const projNo = d.boardId ? projectMap.get(d.boardId) : undefined;
+
+      // Parse assignee IDs and map to user details
+      let assignees: Array<{ id: string; name: string; role: string }> = [];
+      if (issue) {
+        try {
+          const assigneeIds = JSON.parse(issue.assigneeIds || '[]') as string[];
+          assignees = assigneeIds
+            .map(id => {
+              const user = userMap.get(id);
+              return user ? { id: user.zohoId, name: user.name, role: user.role } : null;
+            })
+            .filter((u): u is { id: string; name: string; role: string } => u !== null);
+        } catch { /* ignore parse errors */ }
+      }
+
+      const subItem: SubItem = {
         id: d.id,
         source: 'deadline' as const,
         deadlineId: d.id,
-        title: d.title,
-        dueDate: d.dueDate.toISOString(),
-        completed: d.completed,
-        isOverdue: !d.completed && new Date(d.dueDate) < now,
-      })),
-      ...notes.map(n => ({
+        boardId: d.boardId,
+        issueId: d.issueId,
+        title: issue?.title || d.title,
+        // Include issue details if available
+        ...(issue && {
+          itemNo: issue.itemNo,
+          status: issue.status,
+          statusGroup: issue.statusGroup,
+          assignees,
+          createdAt: issue.createdAt,
+        }),
+        ...(projNo && { projNo }),
+      };
+
+      if (d.deadlineGroupId && groupMap.has(d.deadlineGroupId)) {
+        groupMap.get(d.deadlineGroupId)!.subItems.push(subItem);
+      } else {
+        const standaloneGroup: DeadlineGroup = {
+          id: `standalone-deadline-${d.id}`,
+          title: d.title,
+          dueDate: d.dueDate.toISOString(),
+          isOverdue: !d.completed && d.dueDate < now,
+          subItems: [subItem],
+        };
+        groupMap.set(standaloneGroup.id, standaloneGroup);
+      }
+    }
+
+    for (const n of notes) {
+      const subItem: SubItem = {
         id: n.id,
         source: 'note' as const,
         noteId: n.id,
         title: n.title,
-        dueDate: n.deadline!.toISOString(),
-        completed: false,
-        isOverdue: new Date(n.deadline!) < now,
-      })),
-    ].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+      };
+
+      if (n.deadlineGroupId && groupMap.has(n.deadlineGroupId)) {
+        groupMap.get(n.deadlineGroupId)!.subItems.push(subItem);
+      } else {
+        const standaloneGroup: DeadlineGroup = {
+          id: `standalone-note-${n.id}`,
+          title: n.title,
+          dueDate: n.deadline!.toISOString(),
+          isOverdue: n.deadline! < now,
+          subItems: [subItem],
+        };
+        groupMap.set(standaloneGroup.id, standaloneGroup);
+      }
+    }
+
+    const combined = Array.from(groupMap.values()).sort(
+      (a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
+    );
 
     res.json({ deadlines: combined });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('Combined deadlines failed:', msg);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/deadlines/available-watchlist — Watchlist entries not already linked to a deadline.
+ * @route GET /api/deadlines/available-watchlist
+ * @method GET
+ * @returns {Object} - { items: { boardId, issueId, issueTitle, issueItemNo }[] }
+ */
+router.get('/available-watchlist', async (req, res) => {
+  try {
+    const [watchlist, deadlines] = await Promise.all([
+      prisma.watchlist.findMany({ where: { userId: 'local' } }),
+      prisma.deadline.findMany({ where: { issueId: { not: null } }, select: { issueId: true } }),
+    ]);
+
+    const deadlineIssueIds = new Set(deadlines.map(d => d.issueId!));
+    const available = watchlist.filter(w => !deadlineIssueIds.has(w.issueId));
+
+    if (available.length === 0) {
+      res.json({ items: [] });
+      return;
+    }
+
+    const issueIds = available.map(w => w.issueId);
+    const issues = await prisma.issue.findMany({
+      where: { zohoId: { in: issueIds } },
+      select: { zohoId: true, itemNo: true, title: true },
+    });
+    const issueMap = new Map(issues.map(i => [i.zohoId, i]));
+
+    const items = available.map(w => {
+      const issue = issueMap.get(w.issueId);
+      return {
+        boardId: w.boardId,
+        issueId: w.issueId,
+        issueTitle: issue?.title ?? 'Unknown',
+        issueItemNo: issue?.itemNo ?? '',
+      };
+    });
+
+    res.json({ items });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('Available watchlist fetch failed:', msg);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/deadlines/batch — Create a deadline group for notes and/or watchlist entries.
+ * @route POST /api/deadlines/batch
+ * @method POST
+ * @body {Object} body: {
+ *   dueDate: string,
+ *   title: string,                — title for the deadline group
+ *   noteIds?: string[],           — active note IDs to set the deadline on
+ *   watchlistItems?: { boardId: string; issueId: string }[],  — watchlist entries to create Deadline records for
+ *   userId?: string,              — user for the group (defaults to 'local')
+ * }
+ * @returns {Object} - { groupId: string, updatedNotes: number, createdDeadlines: number }
+ */
+router.post('/batch', async (req, res) => {
+  try {
+    const { dueDate, title, noteIds, watchlistItems, userId } = req.body as {
+      dueDate: string;
+      title: string;
+      noteIds?: string[];
+      watchlistItems?: { boardId: string; issueId: string }[];
+      userId?: string;
+    };
+
+    if (!dueDate || !title) {
+      res.status(400).json({ error: 'dueDate and title are required' });
+      return;
+    }
+
+    const parsedDate = new Date(dueDate);
+    if (isNaN(parsedDate.getTime())) {
+      res.status(400).json({ error: 'Invalid dueDate' });
+      return;
+    }
+
+    const hasNotes = noteIds && noteIds.length > 0;
+    const hasWatchlist = watchlistItems && watchlistItems.length > 0;
+
+    if (!hasNotes && !hasWatchlist) {
+      res.status(400).json({ error: 'At least one note or watchlist item is required' });
+      return;
+    }
+
+    const effectiveUserId = userId ?? 'local';
+
+    const group = await prisma.deadlineGroup.create({
+      data: {
+        title,
+        dueDate: parsedDate,
+        userId: effectiveUserId,
+      },
+    });
+
+    let updatedNotes = 0;
+    let createdDeadlines = 0;
+
+    if (hasNotes) {
+      const result = await prisma.note.updateMany({
+        where: { id: { in: noteIds! }, state: 'active' },
+        data: { deadline: parsedDate, deadlineGroupId: group.id },
+      });
+      updatedNotes = result.count;
+    }
+
+    if (hasWatchlist) {
+      for (const item of watchlistItems!) {
+        await prisma.deadline.create({
+          data: {
+            userId: effectiveUserId,
+            title,
+            dueDate: parsedDate,
+            boardId: item.boardId,
+            issueId: item.issueId,
+            deadlineGroupId: group.id,
+          },
+        });
+        createdDeadlines++;
+      }
+    }
+
+    res.json({ groupId: group.id, updatedNotes, createdDeadlines });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('Batch deadline create failed:', msg);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -232,6 +534,66 @@ router.get('/upcoming', async (req, res) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('Upcoming deadlines failed:', msg);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * DELETE /api/deadlines/groups/:groupId — Delete a deadline group and clear associated deadlines.
+ * @route DELETE /api/deadlines/groups/:groupId
+ * @method DELETE
+ * @params {string} groupId - DeadlineGroup UUID (or synthetic ID like 'standalone-deadline-xxx' or 'standalone-note-xxx')
+ * @returns {Object} - { deleted: boolean, clearedNotes: number, deletedDeadlines: number }
+ */
+router.delete('/groups/:groupId', async (req, res) => {
+  try {
+    const { groupId } = req.params;
+
+    // Handle synthetic IDs for standalone deadlines/notes
+    if (groupId.startsWith('standalone-deadline-')) {
+      const deadlineId = groupId.replace('standalone-deadline-', '');
+      await prisma.deadline.delete({ where: { id: deadlineId } });
+      res.json({ deleted: true, clearedNotes: 0, deletedDeadlines: 1 });
+      return;
+    }
+
+    if (groupId.startsWith('standalone-note-')) {
+      const noteId = groupId.replace('standalone-note-', '');
+      await prisma.note.update({
+        where: { id: noteId },
+        data: { deadline: null, deadlineGroupId: null },
+      });
+      res.json({ deleted: true, clearedNotes: 1, deletedDeadlines: 0 });
+      return;
+    }
+
+    // Handle real deadline groups
+    const group = await prisma.deadlineGroup.findUnique({ where: { id: groupId } });
+    if (!group) {
+      res.status(404).json({ error: 'Deadline group not found' });
+      return;
+    }
+
+    const [notesResult, deadlinesResult] = await Promise.all([
+      prisma.note.updateMany({
+        where: { deadlineGroupId: groupId },
+        data: { deadline: null, deadlineGroupId: null },
+      }),
+      prisma.deadline.deleteMany({
+        where: { deadlineGroupId: groupId },
+      }),
+    ]);
+
+    await prisma.deadlineGroup.delete({ where: { id: groupId } });
+
+    res.json({
+      deleted: true,
+      clearedNotes: notesResult.count,
+      deletedDeadlines: deadlinesResult.count,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('Deadline group delete failed:', msg);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

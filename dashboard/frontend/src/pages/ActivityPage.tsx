@@ -11,6 +11,8 @@ import {
 } from '../api/client';
 import { WatchlistCompactRow } from '../components/WatchlistCompactRow';
 import { BackButton } from '../components/BackButton';
+import { CreateDeadlineModal } from '../components/CreateDeadlineModal';
+import { DeadlineRow } from '../components/DeadlineRow';
 import { C, R, font } from '../theme';
 
 export function ActivityPage() {
@@ -238,12 +240,18 @@ function DeadlinesCard() {
   const navigate = useNavigate();
   const [deadlines, setDeadlines] = useState<CombinedDeadline[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState('');
+
+  useEffect(() => {
+    fetchAppConfig().then(({ workspaceName: wn }) => setWorkspaceName(wn)).catch(() => {});
+  }, []);
 
   const loadDeadlines = useCallback(async () => {
     try {
       const { deadlines: data } = await fetchCombinedDeadlines();
       const sorted = [...data].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
-      setDeadlines(sorted.slice(0, 10));
+      setDeadlines(sorted.slice(0, 5));
     } catch (err) {
       console.error('Failed to load deadlines:', err);
     } finally {
@@ -257,26 +265,6 @@ function DeadlinesCard() {
     return () => clearInterval(interval);
   }, [loadDeadlines]);
 
-  const formatDueDate = (dueDate: string) => {
-    const now = new Date();
-    const due = new Date(dueDate);
-    const diffMs = due.getTime() - now.getTime();
-    const diffHours = diffMs / (1000 * 60 * 60);
-    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-
-    if (diffMs < 0) {
-      const pastDays = Math.abs(diffDays);
-      if (pastDays === 0) return 'today';
-      if (pastDays === 1) return 'yesterday';
-      return `${pastDays}d ago`;
-    }
-    if (diffHours < 1) return 'in <1h';
-    if (diffHours < 24) return `in ${Math.ceil(diffHours)}h`;
-    if (diffDays === 0) return 'today';
-    if (diffDays === 1) return 'tomorrow';
-    return `in ${diffDays}d`;
-  };
-
   return (
     <div style={s.deadlinesCard}>
       <div style={s.cardHeader}>
@@ -284,7 +272,17 @@ function DeadlinesCard() {
           <Calendar size={16} strokeWidth={1.5} color={C.inkSubtle} style={{ verticalAlign: 'middle', marginRight: 6 }} />
           Deadlines
         </h2>
+        <button style={s.addNoteBtn} onClick={() => setShowCreateModal(true)}>
+          <Plus size={12} strokeWidth={1.5} color="#fff" style={{ verticalAlign: 'middle', marginRight: 4 }} />
+          Add
+        </button>
       </div>
+      {showCreateModal && (
+        <CreateDeadlineModal
+          onClose={() => setShowCreateModal(false)}
+          onCreated={() => loadDeadlines()}
+        />
+      )}
       <div style={s.cardBody}>
         {loading ? (
           <p style={s.placeholder}>Loading deadlines...</p>
@@ -294,28 +292,11 @@ function DeadlinesCard() {
           <>
             <div style={s.deadlinesList}>
               {deadlines.map(dl => (
-                <div
-                  key={`${dl.source}-${dl.id}`}
-                  style={{
-                    ...s.deadlineItem,
-                    ...(dl.isOverdue ? s.deadlineItemOverdue : {}),
-                  }}
-                  onClick={() => {
-                    if (dl.source === 'note' && dl.noteId) navigate(`/notes/${dl.noteId}`);
-                  }}
-                >
-                  <div style={s.deadlineItemLeft}>
-                    {dl.isOverdue && <span style={s.deadlineAlert}>!</span>}
-                    <span style={s.deadlineTitle}>{dl.title}</span>
-                    <span style={s.deadlineSource}>{dl.source === 'note' ? 'Note' : 'Deadline'}</span>
-                  </div>
-                  <span style={{
-                    ...s.deadlineDue,
-                    ...(dl.isOverdue ? { color: C.danger } : {}),
-                  }}>
-                    Due: {formatDueDate(dl.dueDate)}
-                  </span>
-                </div>
+                <DeadlineRow
+                  key={dl.id}
+                  deadline={dl}
+                  workspaceName={workspaceName}
+                />
               ))}
             </div>
             <div style={s.cardFooter}>
@@ -722,64 +703,6 @@ const s: Record<string, React.CSSProperties> = {
   deadlinesList: {
     display: 'flex',
     flexDirection: 'column' as const,
-  },
-  deadlineItem: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '12px 20px',
-    borderBottom: `1px solid ${C.hairline}`,
-    cursor: 'pointer',
-    transition: 'background-color 0.1s',
-  },
-  deadlineItemOverdue: {
-    borderLeft: `3px solid ${C.danger}`,
-    backgroundColor: `${C.danger}08`,
-  },
-  deadlineItemLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-    minWidth: 0,
-  },
-  deadlineAlert: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 18,
-    height: 18,
-    borderRadius: R.pill,
-    backgroundColor: C.danger,
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: 700,
-    flexShrink: 0,
-  },
-  deadlineTitle: {
-    fontSize: 13,
-    fontWeight: 500,
-    color: C.inkMuted,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap' as const,
-  },
-  deadlineSource: {
-    fontSize: 10,
-    fontWeight: 600,
-    color: C.inkTertiary,
-    backgroundColor: C.surface2,
-    padding: '2px 6px',
-    borderRadius: R.sm,
-    flexShrink: 0,
-    textTransform: 'uppercase' as const,
-  },
-  deadlineDue: {
-    fontSize: 12,
-    color: C.inkSubtle,
-    flexShrink: 0,
-    marginLeft: 12,
-    fontFamily: font.text,
   },
 
   boardGroup: {
