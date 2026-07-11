@@ -11,6 +11,7 @@ import {
   searchUsers, searchIssues,
   type NoteEntry, type UserSearchResult, type IssueSearchResult,
 } from '../api/client';
+import { handleApiError } from '../errorHandler';
 import { BackButton } from '../components/BackButton';
 import { C, R, font } from '../theme';
 
@@ -501,14 +502,7 @@ export function NotesPage() {
       setNotes(prev => prev.filter(n => n.id !== id));
       if (noteId === id) navigate('/notes');
     } catch (err: unknown) {
-      const message = err instanceof Error && 'response' in err
-        ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
-        : undefined;
-      if (message) {
-        alert(message);
-      } else {
-        console.error('Failed to delete note:', err);
-      }
+      handleApiError(err, 'Failed to delete note:');
     }
   }, [noteId, navigate]);
 
@@ -909,7 +903,17 @@ export function NotesPage() {
                     <><Unlock size={14} strokeWidth={1.5} style={{ marginRight: 4 }} />Reopen</>
                   )}
                 </button>
-                <button style={s.deleteBtnSmall} onClick={() => handleDeleteNote(selectedNote.id)}>
+                <button 
+                  style={selectedNote.deadline ? s.deleteBtnDisabled : s.deleteBtnSmall} 
+                  onClick={() => {
+                    if (selectedNote.deadline) {
+                      alert('Cannot delete note with active deadline. To delete this note: 1) Click "Edit" 2) Clear the deadline field 3) Save the note 4) Then delete it');
+                    } else {
+                      handleDeleteNote(selectedNote.id);
+                    }
+                  }}
+                  title={selectedNote.deadline ? 'Cannot delete note with active deadline. Edit the note and remove the deadline first.' : undefined}
+                >
                   <Trash2 size={14} strokeWidth={1.5} style={{ marginRight: 4 }} />
                   Delete
                 </button>
@@ -1472,5 +1476,20 @@ const s: Record<string, React.CSSProperties> = {
     marginLeft: 'auto',
     display: 'flex',
     alignItems: 'center',
+  },
+  deleteBtnDisabled: {
+    padding: '8px 16px',
+    backgroundColor: 'transparent',
+    color: C.inkTertiary,
+    border: `1px solid ${C.hairline}`,
+    borderRadius: R.sm,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'not-allowed',
+    fontFamily: font.text,
+    marginLeft: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    opacity: 0.6,
   },
 };

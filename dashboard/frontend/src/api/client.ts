@@ -976,13 +976,14 @@ export async function fetchBacklogStats(
  * Watchlist entry — an issue marked as important by a user on a specific board.
  */
 export interface WatchlistEntry {
-  id:        string;
-  boardId:   string;
-  issueId:   string;
-  userId:    string;
-  important: boolean;
-  createdAt: string;
-  updatedAt: string;
+  id:          string;
+  boardId:     string;
+  issueId:     string;
+  userId:      string;
+  important:   boolean;
+  hasDeadline: boolean;
+  createdAt:   string;
+  updatedAt:   string;
 }
 
 /**

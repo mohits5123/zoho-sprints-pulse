@@ -134,7 +134,7 @@ export function DeadlineRow({
 
             return (
               <div
-                key={subItem.id}
+                key={`${subItem.source}-${subItem.id}`}
                 style={{
                   ...s.subItem,
                   cursor: hasZohoUrl || subItem.source === 'note' ? 'pointer' : 'default',

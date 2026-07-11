@@ -13,6 +13,7 @@ export function WatchlistCompactRow({
   watchedStates,
   workspaceName,
   projNo,
+  hasDeadline,
   onToggleImportant,
 }: {
   issue: IssueItem;
@@ -21,6 +22,7 @@ export function WatchlistCompactRow({
   watchedStates: string[];
   workspaceName: string;
   projNo: string;
+  hasDeadline?: boolean;
   onToggleImportant: (issueId: string, boardId: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -56,12 +58,19 @@ export function WatchlistCompactRow({
           style={{
             ...s.starBtn,
             opacity: hovered || issue._important ? 1 : 0.3,
+            ...(hasDeadline && issue._important ? { opacity: 0.5, cursor: 'not-allowed' } : {}),
           }}
           onClick={(e) => {
             e.stopPropagation();
-            onToggleImportant(issue.zohoId, boardId);
+            if (hasDeadline && issue._important) {
+              alert('Cannot unwatch ticket with active deadline. To unwatch: 1) Go to Deadlines page 2) Find and remove the deadline for this ticket 3) Then unwatch it');
+            } else {
+              onToggleImportant(issue.zohoId, boardId);
+            }
           }}
-          title={issue._important ? 'Remove from important' : 'Mark as important'}
+          title={hasDeadline && issue._important 
+            ? 'Cannot unwatch ticket with active deadline. Remove the deadline first.' 
+            : issue._important ? 'Remove from important' : 'Mark as important'}
         >
           <Star
             size={14}

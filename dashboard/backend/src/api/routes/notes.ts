@@ -147,7 +147,9 @@ router.delete('/:noteId', async (req, res) => {
     // Check if the note has a deadline before allowing deletion
     const note = await prisma.note.findUnique({ where: { id: noteId } });
     if (note?.deadline) {
-      res.status(400).json({ error: 'Cannot delete a note that has a deadline. Remove the deadline first.' });
+      res.status(400).json({ 
+        error: 'Cannot delete note with active deadline. To delete this note: 1) Click "Edit" 2) Clear the deadline field 3) Save the note 4) Then delete it' 
+      });
       return;
     }
     await prisma.note.delete({ where: { id: noteId } });

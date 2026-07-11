@@ -9,6 +9,7 @@ import {
   type NoteEntry, type ActivityNotification, type WatchlistEntry, type IssueItem,
   type CombinedDeadline,
 } from '../api/client';
+import { handleApiError } from '../errorHandler';
 import { WatchlistCompactRow } from '../components/WatchlistCompactRow';
 import { BackButton } from '../components/BackButton';
 import { CreateDeadlineModal } from '../components/CreateDeadlineModal';
@@ -413,14 +414,7 @@ function WatchlistCard() {
         });
       }
     } catch (err: unknown) {
-      const message = err instanceof Error && 'response' in err
-        ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
-        : undefined;
-      if (message) {
-        alert(message);
-      } else {
-        console.error('Failed to toggle important:', err);
-      }
+      handleApiError(err, 'Failed to toggle important:');
     }
   };
 
@@ -514,6 +508,7 @@ function WatchlistCard() {
                       watchedStates={[]}
                       workspaceName={workspaceName}
                       projNo={projNo}
+                      hasDeadline={entry.hasDeadline}
                       onToggleImportant={handleToggleImportant}
                     />
                   );

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { fetchIssues, fetchIssuesKanban, fetchProject, fetchAppConfig, toggleImportant, type IssueItem } from '../api/client';
+import { handleApiError } from '../errorHandler';
 import { IssueRow } from '../components/IssueRow';
 import { BackButton } from '../components/BackButton';
 import { C, R, font } from '../theme';
@@ -149,14 +150,7 @@ export function IssueListPage() {
                     setIssues(data.sort((a, b) => (ORDER[a.statusGroup] ?? 1) - (ORDER[b.statusGroup] ?? 1)));
                   }
                 } catch (err: unknown) {
-                  const message = err instanceof Error && 'response' in err
-                    ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
-                    : undefined;
-                  if (message) {
-                    alert(message);
-                  } else {
-                    console.error('Failed to toggle important:', err);
-                  }
+                  handleApiError(err, 'Failed to toggle important:');
                 }
               }}
             />

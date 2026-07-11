@@ -13,20 +13,26 @@ const router = Router();
 /**
  * Extract project number from raw Zoho data.
  * 
- * Parses the rawData field (which is a JSON string) to extract the projNo field.
- * This field may be stored in either 'prop.projNo' or 'fields[index]' depending on
- * how Zoho returns the data. Returns null if parsing fails or field is missing.
+ * Zoho's API returns project data in a denormalized format:
+ * - `prop` is a mapping of field names to their indices in the `fields` array
+ *   (e.g., `{ projName: 0, owner: 5, projNo: 3 }`)
+ * - `fields` is an array of actual field values at those indices
  * 
- * @param rawData - JSON string from Zoho project data
+ * So `prop.projNo` gives us the INDEX where the project number is stored,
+ * not the project number itself. We then look up `fields[prop.projNo]` to get
+ * the actual project number value.
+ * 
+ * @param rawData - JSON string containing { fields: unknown[], prop: Record<string, number> }
  * @returns Project number as string, or null if not found
  */
 function extractProjNo(rawData: string | null): string | null {
   try {
     if (!rawData) return null;
     const rd = JSON.parse(rawData) as { fields?: unknown[]; prop?: Record<string, number> };
-    const idx = rd.prop?.projNo ?? 1;
-    const val = rd.fields?.[idx];
-    return val != null ? String(val) : null;
+    // prop.projNo is the INDEX into fields array, not the value itself
+    const projNoIndex = rd.prop?.projNo ?? 1;
+    const projNoValue = rd.fields?.[projNoIndex];
+    return projNoValue != null ? String(projNoValue) : null;
   } catch { return null; }
 }
 
@@ -474,40 +480,41 @@ router.post('/batch', async (req, res) => {
 
     const effectiveUserId = userId ?? 'local';
 
-    const group = await prisma.deadlineGroup.create({
-      data: {
-        title,
-        dueDate: parsedDate,
-        userId: effectiveUserId,
-      },
-    });
-
-    let updatedNotes = 0;
-    let createdDeadlines = 0;
-
-    if (hasNotes) {
-      const result = await prisma.note.updateMany({
-        where: { id: { in: noteIds! }, state: 'active' },
-        data: { deadline: parsedDate, deadlineGroupId: group.id },
+    const { group, updatedNotes, createdDeadlines } = await prisma.$transaction(async (tx) => {
+      const newGroup = await tx.deadlineGroup.create({
+        data: {
+          title,
+          dueDate: parsedDate,
+          userId: effectiveUserId,
+        },
       });
-      updatedNotes = result.count;
-    }
 
-    if (hasWatchlist) {
-      for (const item of watchlistItems!) {
-        await prisma.deadline.create({
-          data: {
+      let noteCount = 0;
+      if (hasNotes) {
+        const result = await tx.note.updateMany({
+          where: { id: { in: noteIds! }, state: 'active' },
+          data: { deadline: parsedDate, deadlineGroupId: newGroup.id },
+        });
+        noteCount = result.count;
+      }
+
+      let deadlineCount = 0;
+      if (hasWatchlist) {
+        const result = await tx.deadline.createMany({
+          data: watchlistItems!.map(item => ({
             userId: effectiveUserId,
             title,
             dueDate: parsedDate,
             boardId: item.boardId,
             issueId: item.issueId,
-            deadlineGroupId: group.id,
-          },
+            deadlineGroupId: newGroup.id,
+          })),
         });
-        createdDeadlines++;
+        deadlineCount = result.count;
       }
-    }
+
+      return { group: newGroup, updatedNotes: noteCount, createdDeadlines: deadlineCount };
+    });
 
     res.json({ groupId: group.id, updatedNotes, createdDeadlines });
   } catch (err) {
@@ -585,126 +592,131 @@ router.patch('/groups/:groupId', async (req, res) => {
 
     const effectiveUserId = userId ?? group.userId;
 
-    // Update the group itself
-    await prisma.deadlineGroup.update({
-      where: { id: groupId },
-      data: {
-        ...(title !== undefined ? { title } : {}),
-        ...(dueDate !== undefined ? { dueDate: parsedDate } : {}),
-      },
-    });
-
-    let updatedNotes = 0;
-    let addedDeadlines = 0;
-    let removedDeadlines = 0;
-
-    // Handle notes: compare current vs desired
-    if (noteIds !== undefined) {
-      const currentNotes = await prisma.note.findMany({
-        where: { deadlineGroupId: groupId },
-        select: { id: true },
+    const result = await prisma.$transaction(async (tx) => {
+      // Update the group itself
+      await tx.deadlineGroup.update({
+        where: { id: groupId },
+        data: {
+          ...(title !== undefined ? { title } : {}),
+          ...(dueDate !== undefined ? { dueDate: parsedDate } : {}),
+        },
       });
-      const currentNoteIds = new Set(currentNotes.map(n => n.id));
-      const desiredNoteIds = new Set(noteIds);
 
-      // Remove notes no longer in the group
-      const notesToRemove = Array.from(currentNoteIds).filter(id => !desiredNoteIds.has(id));
-      if (notesToRemove.length > 0) {
-        const result = await prisma.note.updateMany({
-          where: { id: { in: notesToRemove } },
-          data: { deadline: null, deadlineGroupId: null },
+      let updatedNotes = 0;
+      let addedDeadlines = 0;
+      let removedDeadlines = 0;
+
+      // Handle notes: compare current vs desired
+      if (noteIds !== undefined) {
+        const currentNotes = await tx.note.findMany({
+          where: { deadlineGroupId: groupId },
+          select: { id: true },
         });
-        removedDeadlines += result.count;
-      }
+        const currentNoteIds = new Set(currentNotes.map(n => n.id));
+        const desiredNoteIds = new Set(noteIds);
 
-      // Add notes newly added to the group
-      const notesToAdd = noteIds.filter(id => !currentNoteIds.has(id));
-      if (notesToAdd.length > 0) {
-        const result = await prisma.note.updateMany({
-          where: { id: { in: notesToAdd }, state: 'active' },
-          data: { deadline: parsedDate, deadlineGroupId: groupId },
-        });
-        updatedNotes += result.count;
-      }
-
-      // Update dueDate on notes that remain in the group (if date changed)
-      if (dueDate !== undefined) {
-        const notesToUpdate = noteIds.filter(id => currentNoteIds.has(id));
-        if (notesToUpdate.length > 0) {
-          const result = await prisma.note.updateMany({
-            where: { id: { in: notesToUpdate } },
-            data: { deadline: parsedDate },
+        // Remove notes no longer in the group
+        const notesToRemove = Array.from(currentNoteIds).filter(id => !desiredNoteIds.has(id));
+        if (notesToRemove.length > 0) {
+          const res = await tx.note.updateMany({
+            where: { id: { in: notesToRemove } },
+            data: { deadline: null, deadlineGroupId: null },
           });
-          updatedNotes += result.count;
+          removedDeadlines += res.count;
+        }
+
+        // Add notes newly added to the group
+        const notesToAdd = noteIds.filter(id => !currentNoteIds.has(id));
+        const addedNoteIds = new Set<string>();
+        if (notesToAdd.length > 0) {
+          const res = await tx.note.updateMany({
+            where: { id: { in: notesToAdd }, state: 'active' },
+            data: { deadline: parsedDate, deadlineGroupId: groupId },
+          });
+          updatedNotes += res.count;
+          notesToAdd.forEach(id => addedNoteIds.add(id));
+        }
+
+        // Update dueDate on notes that remain in the group (if date changed)
+        // Exclude newly added notes to avoid double-counting
+        if (dueDate !== undefined) {
+          const notesToUpdate = noteIds.filter(id => currentNoteIds.has(id) && !addedNoteIds.has(id));
+          if (notesToUpdate.length > 0) {
+            const res = await tx.note.updateMany({
+              where: { id: { in: notesToUpdate } },
+              data: { deadline: parsedDate },
+            });
+            updatedNotes += res.count;
+          }
         }
       }
-    }
 
-    // Handle watchlist items: compare current vs desired
-    if (watchlistItems !== undefined) {
-      const currentDeadlines = await prisma.deadline.findMany({
-        where: { deadlineGroupId: groupId, issueId: { not: null } },
-        select: { id: true, boardId: true, issueId: true },
-      });
-      const currentKeys = new Set(
-        currentDeadlines.map(d => `${d.boardId}|${d.issueId}`),
-      );
-      const desiredKeys = new Set(
-        watchlistItems.map(w => `${w.boardId}|${w.issueId}`),
-      );
-
-      // Remove deadlines no longer in the group
-      const toRemove = currentDeadlines.filter(d => !desiredKeys.has(`${d.boardId}|${d.issueId}`));
-      if (toRemove.length > 0) {
-        await prisma.deadline.deleteMany({
-          where: { id: { in: toRemove.map(d => d.id) } },
+      // Handle watchlist items: compare current vs desired
+      if (watchlistItems !== undefined) {
+        const currentDeadlines = await tx.deadline.findMany({
+          where: { deadlineGroupId: groupId, issueId: { not: null } },
+          select: { id: true, boardId: true, issueId: true },
         });
-        removedDeadlines += toRemove.length;
-      }
+        const currentKeys = new Set(
+          currentDeadlines.map(d => `${d.boardId}|${d.issueId}`),
+        );
+        const desiredKeys = new Set(
+          watchlistItems.map(w => `${w.boardId}|${w.issueId}`),
+        );
 
-      // Add new watchlist items
-      for (const item of watchlistItems) {
-        const key = `${item.boardId}|${item.issueId}`;
-        if (!currentKeys.has(key)) {
-          await prisma.deadline.create({
-            data: {
+        // Remove deadlines no longer in the group
+        const toRemove = currentDeadlines.filter(d => !desiredKeys.has(`${d.boardId}|${d.issueId}`));
+        if (toRemove.length > 0) {
+          await tx.deadline.deleteMany({
+            where: { id: { in: toRemove.map(d => d.id) } },
+          });
+          removedDeadlines += toRemove.length;
+        }
+
+        // Add new watchlist items in bulk
+        const itemsToAdd = watchlistItems.filter(item => !currentKeys.has(`${item.boardId}|${item.issueId}`));
+        if (itemsToAdd.length > 0) {
+          await tx.deadline.createMany({
+            data: itemsToAdd.map(item => ({
               userId: effectiveUserId,
               title: title ?? group.title,
               dueDate: parsedDate,
               boardId: item.boardId,
               issueId: item.issueId,
               deadlineGroupId: groupId,
-            },
+            })),
           });
-          addedDeadlines++;
+          addedDeadlines += itemsToAdd.length;
         }
-      }
 
-      // Update dueDate and title on existing deadlines (if changed)
-      if (dueDate !== undefined || title !== undefined) {
-        const existingKeys = new Set(
-          watchlistItems
-            .map(w => `${w.boardId}|${w.issueId}`)
-            .filter(k => currentKeys.has(k)),
-        );
-        if (existingKeys.size > 0) {
-          const existingDeadlines = currentDeadlines.filter(
-            d => existingKeys.has(`${d.boardId}|${d.issueId}`),
+        // Update dueDate and title on existing deadlines (if changed)
+        if (dueDate !== undefined || title !== undefined) {
+          const existingKeys = new Set(
+            watchlistItems
+              .map(w => `${w.boardId}|${w.issueId}`)
+              .filter(k => currentKeys.has(k)),
           );
-          if (existingDeadlines.length > 0) {
-            await prisma.deadline.updateMany({
-              where: { id: { in: existingDeadlines.map(d => d.id) } },
-              data: {
-                ...(dueDate !== undefined ? { dueDate: parsedDate } : {}),
-                ...(title !== undefined ? { title } : {}),
-              },
-            });
+          if (existingKeys.size > 0) {
+            const existingDeadlines = currentDeadlines.filter(
+              d => existingKeys.has(`${d.boardId}|${d.issueId}`),
+            );
+            if (existingDeadlines.length > 0) {
+              await tx.deadline.updateMany({
+                where: { id: { in: existingDeadlines.map(d => d.id) } },
+                data: {
+                  ...(dueDate !== undefined ? { dueDate: parsedDate } : {}),
+                  ...(title !== undefined ? { title } : {}),
+                },
+              });
+            }
           }
         }
       }
-    }
 
-    res.json({ groupId: group.id, updatedNotes, addedDeadlines, removedDeadlines });
+      return { updatedNotes, addedDeadlines, removedDeadlines };
+    });
+
+    res.json({ groupId: group.id, ...result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('Deadline group update failed:', msg);
@@ -726,18 +738,42 @@ router.delete('/groups/:groupId', async (req, res) => {
     // Handle synthetic IDs for standalone deadlines/notes
     if (groupId.startsWith('standalone-deadline-')) {
       const deadlineId = groupId.replace('standalone-deadline-', '');
-      await prisma.deadline.delete({ where: { id: deadlineId } });
-      res.json({ deleted: true, clearedNotes: 0, deletedDeadlines: 1 });
+      if (!deadlineId) {
+        res.status(400).json({ error: 'Invalid standalone deadline ID' });
+        return;
+      }
+      try {
+        await prisma.deadline.delete({ where: { id: deadlineId } });
+        res.json({ deleted: true, clearedNotes: 0, deletedDeadlines: 1 });
+      } catch (err: unknown) {
+        if (err && typeof err === 'object' && 'code' in err && (err as { code: string }).code === 'P2025') {
+          res.status(404).json({ error: 'Standalone deadline not found' });
+        } else {
+          throw err;
+        }
+      }
       return;
     }
 
     if (groupId.startsWith('standalone-note-')) {
       const noteId = groupId.replace('standalone-note-', '');
-      await prisma.note.update({
-        where: { id: noteId },
-        data: { deadline: null, deadlineGroupId: null },
-      });
-      res.json({ deleted: true, clearedNotes: 1, deletedDeadlines: 0 });
+      if (!noteId) {
+        res.status(400).json({ error: 'Invalid standalone note ID' });
+        return;
+      }
+      try {
+        await prisma.note.update({
+          where: { id: noteId },
+          data: { deadline: null, deadlineGroupId: null },
+        });
+        res.json({ deleted: true, clearedNotes: 1, deletedDeadlines: 0 });
+      } catch (err: unknown) {
+        if (err && typeof err === 'object' && 'code' in err && (err as { code: string }).code === 'P2025') {
+          res.status(404).json({ error: 'Standalone note not found' });
+        } else {
+          throw err;
+        }
+      }
       return;
     }
 

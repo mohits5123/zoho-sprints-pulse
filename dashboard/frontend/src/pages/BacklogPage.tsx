@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { fetchProject, fetchBacklogStats, fetchAppConfig, toggleImportant, type IssueItem, type Project } from '../api/client';
+import { handleApiError } from '../errorHandler';
 import { IssueRow } from '../components/IssueRow';
 import { UserAvatar } from '../components/UserAvatar';
 import { BackButton } from '../components/BackButton';
@@ -114,14 +115,7 @@ export function BacklogPage() {
         });
       }
     } catch (err: unknown) {
-      const message = err instanceof Error && 'response' in err
-        ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
-        : undefined;
-      if (message) {
-        alert(message);
-      } else {
-        console.error('Failed to toggle important:', err);
-      }
+      handleApiError(err, 'Failed to toggle important:');
     }
   }
 

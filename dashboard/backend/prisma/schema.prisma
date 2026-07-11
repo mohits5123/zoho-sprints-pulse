@@ -113,7 +113,8 @@ model Note {
   taggedUserIds    String                         // JSON string of user zohoIds mentioned: '["zohoId1","zohoId2"]'
   state            String     @default("active")  // "active" or "closed"
   deadline         DateTime?                      // optional deadline for this note
-  deadlineGroupId  String?                        // group ID if part of a grouped deadline
+  deadlineGroupId  String?
+  deadlineGroup    DeadlineGroup? @relation("NoteDeadlineGroup", fields: [deadlineGroupId], references: [id])
   deadlineNotified Boolean    @default(false)     // whether 1-day-before notification was sent
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
@@ -126,6 +127,8 @@ model DeadlineGroup {
   userId    String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  notes     Note[]     @relation("NoteDeadlineGroup")
+  deadlines Deadline[] @relation("DeadlineDeadlineGroup")
 }
 
 model Deadline {
@@ -135,7 +138,8 @@ model Deadline {
   userId          String                       // user who set the deadline
   title           String
   dueDate         DateTime
-  deadlineGroupId String?                      // group ID if part of a grouped deadline
+  deadlineGroupId String?
+  deadlineGroup   DeadlineGroup? @relation("DeadlineDeadlineGroup", fields: [deadlineGroupId], references: [id])
   completed       Boolean @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
