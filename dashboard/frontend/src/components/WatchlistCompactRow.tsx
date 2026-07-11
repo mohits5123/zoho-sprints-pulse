@@ -51,7 +51,7 @@ export function WatchlistCompactRow({
       onMouseLeave={() => setHovered(false)}
       onClick={zohoUrl ? () => window.open(zohoUrl, '_blank', 'noopener,noreferrer') : undefined}
     >
-      <div style={s.colStar}>
+      <div style={{ width: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
         <button
           style={{
             ...s.starBtn,
@@ -76,11 +76,11 @@ export function WatchlistCompactRow({
         <span style={{ ...s.itemNo, color: zohoUrl && hovered ? C.primaryHover : undefined }}>#{issue.itemNo}</span>
       </div>
 
-      <div style={s.colTitle}>{issue.title}</div>
+      <span style={{ ...s.col, flex: 1, color: C.inkMuted, fontSize: 13, fontFamily: font.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{issue.title}</span>
 
-      <div style={{ ...s.col, ...s.colStatus, display: 'flex', alignItems: 'flex-start', gap: 5, paddingTop: 3 }}>
-        <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: dotColor, flexShrink: 0, display: 'inline-block', marginTop: 3 }} />
-        <span style={{ fontSize: 11, color: C.inkSubtle, fontFamily: font.text, lineHeight: '1.3', wordBreak: 'break-word' as const }}>{issue.status}</span>
+      <div style={{ ...s.col, ...s.colStatus, display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: dotColor, flexShrink: 0, display: 'inline-block' }} />
+        <span style={{ fontSize: 11, color: C.inkSubtle, whiteSpace: 'nowrap' as const, fontFamily: font.text }}>{issue.status}</span>
       </div>
 
       <div style={{ ...s.col, ...s.colUser, display: 'flex', gap: 3, flexWrap: 'wrap' as const }}>
@@ -108,22 +108,11 @@ const s: Record<string, React.CSSProperties> = {
     transition: 'background-color 0.1s',
     cursor: 'default',
   },
-  col:      { display: 'flex', alignItems: 'center', flexShrink: 0, boxSizing: 'border-box' as const },
-  colStar:  { width: '4%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  colId:    { width: '8%' },
-  colTitle: {
-    width: '42%', flexShrink: 0, boxSizing: 'border-box' as const,
-    fontSize: 13, fontFamily: font.text, color: C.inkMuted,
-    display: '-webkit-box',
-    WebkitLineClamp: 2,
-    WebkitBoxOrient: 'vertical' as const,
-    overflow: 'hidden',
-    lineHeight: '1.4',
-    wordBreak: 'break-word' as const,
-  },
-  colStatus:{ width: '18%' },
-  colUser:  { width: '16%', justifyContent: 'center' as const },
-  colAge:   { width: '12%', justifyContent: 'flex-end' as const, fontSize: 11, fontFamily: font.text },
+  col:      { display: 'flex', alignItems: 'center', flexShrink: 0 },
+  colId:    { width: 60 },
+  colStatus:{ width: 120 },
+  colUser:  { width: 80, justifyContent: 'center' as const },
+  colAge:   { width: 50, justifyContent: 'flex-end' as const, fontSize: 11, fontFamily: font.text },
   itemNo: {
     fontSize: 12, fontWeight: 400, color: C.inkTertiary,
     fontFamily: font.mono,

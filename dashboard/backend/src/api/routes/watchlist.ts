@@ -111,14 +111,6 @@ router.patch('/:issueId/toggle-important', async (req, res) => {
     }
 
     if (existing.important) {
-      // Check if this issue has a deadline before allowing removal
-      const deadline = await prisma.deadline.findFirst({
-        where: { issueId, userId: existing.userId },
-      });
-      if (deadline) {
-        res.status(400).json({ error: 'Cannot unwatch a ticket that has a deadline. Remove the deadline first.' });
-        return;
-      }
       await prisma.watchlist.delete({ where: { id: existing.id } });
       res.json({ watchlist: { ...existing, important: false } });
       return;

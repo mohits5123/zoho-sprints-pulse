@@ -113,15 +113,8 @@ export function BacklogPage() {
           ),
         });
       }
-    } catch (err: unknown) {
-      const message = err instanceof Error && 'response' in err
-        ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
-        : undefined;
-      if (message) {
-        alert(message);
-      } else {
-        console.error('Failed to toggle important:', err);
-      }
+    } catch (err) {
+      console.error('Failed to toggle important:', err);
     }
   }
 
