@@ -113,21 +113,32 @@ model Note {
   taggedUserIds    String                         // JSON string of user zohoIds mentioned: '["zohoId1","zohoId2"]'
   state            String     @default("active")  // "active" or "closed"
   deadline         DateTime?                      // optional deadline for this note
+  deadlineGroupId  String?                        // group ID if part of a grouped deadline
   deadlineNotified Boolean    @default(false)     // whether 1-day-before notification was sent
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 }
 
-model Deadline {
+model DeadlineGroup {
   id        String   @id @default(uuid())
-  boardId   String?                      // project zohoId, null = across all boards
-  issueId   String?                      // issue zohoId, null = standalone reminder
-  userId    String                       // user who set the deadline
   title     String
   dueDate   DateTime
-  completed Boolean @default(false)
+  userId    String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model Deadline {
+  id              String   @id @default(uuid())
+  boardId         String?                      // project zohoId, null = across all boards
+  issueId         String?                      // issue zohoId, null = standalone reminder
+  userId          String                       // user who set the deadline
+  title           String
+  dueDate         DateTime
+  deadlineGroupId String?                      // group ID if part of a grouped deadline
+  completed       Boolean @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 model ActivityNotification {
