@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Plus, Calendar, Eye, FileText, ArrowRight } from 'lucide-react';
+import { Bell, Plus, Calendar, Eye, FileText, X, ArrowRight } from 'lucide-react';
 import {
-  fetchNotes,
+  fetchNotes, deleteNote,
   fetchNotifications, markNotificationRead,
   fetchWatchlist, toggleImportant, fetchIssueById, fetchAppConfig, fetchProject,
   fetchCombinedDeadlines, fetchNote,
@@ -11,8 +11,6 @@ import {
 } from '../api/client';
 import { WatchlistCompactRow } from '../components/WatchlistCompactRow';
 import { BackButton } from '../components/BackButton';
-import { CreateDeadlineModal } from '../components/CreateDeadlineModal';
-import { DeadlineRow } from '../components/DeadlineRow';
 import { C, R, font } from '../theme';
 
 export function ActivityPage() {
@@ -240,25 +238,12 @@ function DeadlinesCard() {
   const navigate = useNavigate();
   const [deadlines, setDeadlines] = useState<CombinedDeadline[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [editingDeadline, setEditingDeadline] = useState<CombinedDeadline | null>(null);
-  const [workspaceName, setWorkspaceName] = useState('');
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    fetchAppConfig().then(({ workspaceName: wn }) => setWorkspaceName(wn)).catch(() => {});
-  }, []);
 
   const loadDeadlines = useCallback(async () => {
     try {
       const { deadlines: data } = await fetchCombinedDeadlines();
       const sorted = [...data].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
-      setDeadlines(sorted.slice(0, 5));
-      // Initialize all multi-item deadlines as expanded by default (only on first load)
-      setExpandedGroups(prev => {
-        if (prev.size > 0) return prev; // Already initialized, preserve user state
-        return new Set(sorted.filter(dl => dl.subItems.length > 1).map(dl => dl.id));
-      });
+      setDeadlines(sorted.slice(0, 10));
     } catch (err) {
       console.error('Failed to load deadlines:', err);
     } finally {
@@ -272,13 +257,25 @@ function DeadlinesCard() {
     return () => clearInterval(interval);
   }, [loadDeadlines]);
 
-  const toggleExpand = useCallback((groupId: string) => {
-    setExpandedGroups(prev => {
-      const next = new Set(prev);
-      if (next.has(groupId)) next.delete(groupId); else next.add(groupId);
-      return next;
-    });
-  }, []);
+  const formatDueDate = (dueDate: string) => {
+    const now = new Date();
+    const due = new Date(dueDate);
+    const diffMs = due.getTime() - now.getTime();
+    const diffHours = diffMs / (1000 * 60 * 60);
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMs < 0) {
+      const pastDays = Math.abs(diffDays);
+      if (pastDays === 0) return 'today';
+      if (pastDays === 1) return 'yesterday';
+      return `${pastDays}d ago`;
+    }
+    if (diffHours < 1) return 'in <1h';
+    if (diffHours < 24) return `in ${Math.ceil(diffHours)}h`;
+    if (diffDays === 0) return 'today';
+    if (diffDays === 1) return 'tomorrow';
+    return `in ${diffDays}d`;
+  };
 
   return (
     <div style={s.deadlinesCard}>
@@ -287,18 +284,7 @@ function DeadlinesCard() {
           <Calendar size={16} strokeWidth={1.5} color={C.inkSubtle} style={{ verticalAlign: 'middle', marginRight: 6 }} />
           Deadlines
         </h2>
-        <button style={s.addNoteBtn} onClick={() => setShowCreateModal(true)}>
-          <Plus size={12} strokeWidth={1.5} color="#fff" style={{ verticalAlign: 'middle', marginRight: 4 }} />
-          Add
-        </button>
       </div>
-      {(showCreateModal || editingDeadline) && (
-        <CreateDeadlineModal
-          onClose={() => { setShowCreateModal(false); setEditingDeadline(null); }}
-          onCreated={() => loadDeadlines()}
-          editDeadline={editingDeadline ?? undefined}
-        />
-      )}
       <div style={s.cardBody}>
         {loading ? (
           <p style={s.placeholder}>Loading deadlines...</p>
@@ -308,14 +294,28 @@ function DeadlinesCard() {
           <>
             <div style={s.deadlinesList}>
               {deadlines.map(dl => (
-                <DeadlineRow
-                  key={dl.id}
-                  deadline={dl}
-                  workspaceName={workspaceName}
-                  isExpanded={expandedGroups.has(dl.id)}
-                  onToggleExpand={() => toggleExpand(dl.id)}
-                  onEdit={() => setEditingDeadline(dl)}
-                />
+                <div
+                  key={`${dl.source}-${dl.id}`}
+                  style={{
+                    ...s.deadlineItem,
+                    ...(dl.isOverdue ? s.deadlineItemOverdue : {}),
+                  }}
+                  onClick={() => {
+                    if (dl.source === 'note' && dl.noteId) navigate(`/notes/${dl.noteId}`);
+                  }}
+                >
+                  <div style={s.deadlineItemLeft}>
+                    {dl.isOverdue && <span style={s.deadlineAlert}>!</span>}
+                    <span style={s.deadlineTitle}>{dl.title}</span>
+                    <span style={s.deadlineSource}>{dl.source === 'note' ? 'Note' : 'Deadline'}</span>
+                  </div>
+                  <span style={{
+                    ...s.deadlineDue,
+                    ...(dl.isOverdue ? { color: C.danger } : {}),
+                  }}>
+                    Due: {formatDueDate(dl.dueDate)}
+                  </span>
+                </div>
               ))}
             </div>
             <div style={s.cardFooter}>
@@ -412,15 +412,8 @@ function WatchlistCard() {
           return next;
         });
       }
-    } catch (err: unknown) {
-      const message = err instanceof Error && 'response' in err
-        ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
-        : undefined;
-      if (message) {
-        alert(message);
-      } else {
-        console.error('Failed to toggle important:', err);
-      }
+    } catch (err) {
+      console.error('Failed to toggle important:', err);
     }
   };
 
@@ -568,6 +561,15 @@ function NotesCard() {
     return () => { cancelled = true; };
   }, []);
 
+  const handleDeleteNote = useCallback(async (noteId: string) => {
+    try {
+      await deleteNote(noteId);
+      setNotes(prev => prev.filter(n => n.id !== noteId));
+    } catch (err) {
+      console.error('Failed to delete note:', err);
+    }
+  }, []);
+
   const relativeTime = (dateStr: string): string => {
     const now = Date.now();
     const then = new Date(dateStr).getTime();
@@ -615,6 +617,13 @@ function NotesCard() {
                 <div style={s.noteListItemMeta}>
                   <span style={s.noteListItemTime}>{relativeTime(note.updatedAt)}</span>
                 </div>
+                <button
+                  style={s.noteDeleteBtn}
+                  onClick={(e) => { e.stopPropagation(); handleDeleteNote(note.id); }}
+                  title="Delete note"
+                >
+                  <X size={16} strokeWidth={1.5} color={C.inkTertiary} />
+                </button>
               </div>
             ))}
           </div>
@@ -714,6 +723,64 @@ const s: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column' as const,
   },
+  deadlineItem: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '12px 20px',
+    borderBottom: `1px solid ${C.hairline}`,
+    cursor: 'pointer',
+    transition: 'background-color 0.1s',
+  },
+  deadlineItemOverdue: {
+    borderLeft: `3px solid ${C.danger}`,
+    backgroundColor: `${C.danger}08`,
+  },
+  deadlineItemLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    minWidth: 0,
+  },
+  deadlineAlert: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 18,
+    height: 18,
+    borderRadius: R.pill,
+    backgroundColor: C.danger,
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 700,
+    flexShrink: 0,
+  },
+  deadlineTitle: {
+    fontSize: 13,
+    fontWeight: 500,
+    color: C.inkMuted,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+  },
+  deadlineSource: {
+    fontSize: 10,
+    fontWeight: 600,
+    color: C.inkTertiary,
+    backgroundColor: C.surface2,
+    padding: '2px 6px',
+    borderRadius: R.sm,
+    flexShrink: 0,
+    textTransform: 'uppercase' as const,
+  },
+  deadlineDue: {
+    fontSize: 12,
+    color: C.inkSubtle,
+    flexShrink: 0,
+    marginLeft: 12,
+    fontFamily: font.text,
+  },
 
   boardGroup: {
     borderBottom: `1px solid ${C.hairline}`,
@@ -783,6 +850,7 @@ const s: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap' as const,
+    paddingRight: 24,
     fontFamily: font.text,
   },
   noteListItemPreview: {
@@ -801,6 +869,18 @@ const s: Record<string, React.CSSProperties> = {
   noteListItemTime: {
     fontSize: 11,
     color: C.inkTertiary,
+  },
+  noteDeleteBtn: {
+    position: 'absolute' as const,
+    top: 12,
+    right: 12,
+    background: 'none',
+    border: 'none',
+    color: C.inkTertiary,
+    fontSize: 18,
+    cursor: 'pointer',
+    padding: '0 4px',
+    lineHeight: 1,
   },
   cardFooter: {
     padding: '12px 20px',

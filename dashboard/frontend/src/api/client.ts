@@ -1056,7 +1056,6 @@ export interface NoteEntry {
   taggedUserIds:    string;         // JSON string of user zohoIds
   state:            string;         // "active" | "closed"
   deadline:         string | null;  // ISO date string or null
-  deadlineGroupId:  string | null;  // group ID if part of a grouped deadline
   deadlineNotified: boolean;
   createdAt:        string;
   updatedAt:        string;
@@ -1170,29 +1169,15 @@ export async function fetchNotesWithDeadlines(userId?: string): Promise<{ notes:
   return res.data;
 }
 
-export interface CombinedDeadlineSubItem {
+export interface CombinedDeadline {
   id:         string;
   source:     'note' | 'deadline';
   noteId?:    string;
   deadlineId?: string;
-  boardId?:   string | null;
-  issueId?:   string | null;
-  title:      string;
-  // Issue details (for ticket sub-items)
-  itemNo?:    string;
-  status?:    string;
-  statusGroup?: string;
-  assignees?: Array<{ id: string; name: string; role: string }>;
-  createdAt?: string | null;
-  projNo?:    string;
-}
-
-export interface CombinedDeadline {
-  id:         string;
   title:      string;
   dueDate:    string;
+  completed:  boolean;
   isOverdue:  boolean;
-  subItems:   CombinedDeadlineSubItem[];
 }
 
 export async function fetchCombinedDeadlines(userId?: string): Promise<{ deadlines: CombinedDeadline[] }> {
@@ -1279,94 +1264,6 @@ export async function fetchUpcomingDeadlines(userId?: string, hours: number = 24
   const params: Record<string, string | number> = { hours };
   if (userId) params.userId = userId;
   const res = await apiClient.get<{ deadlines: DeadlineEntry[]; total: number }>('/deadlines/upcoming', { params });
-  return res.data;
-}
-
-/**
- * Available watchlist item — a watchlist entry not already linked to a deadline,
- * with issue details for display.
- */
-export interface AvailableWatchlistItem {
-  boardId:       string;
-  issueId:       string;
-  issueTitle:    string;
-  issueItemNo:   string;
-}
-
-/**
- * Fetch watchlist entries that are not already part of any deadline.
- *
- * @param excludeGroupId - Optional deadline group UUID whose items should still appear (for editing).
- * @returns Available watchlist items with issue details.
- */
-export async function fetchAvailableWatchlist(excludeGroupId?: string): Promise<{ items: AvailableWatchlistItem[] }> {
-  const params: Record<string, string> = {};
-  if (excludeGroupId) params.excludeGroupId = excludeGroupId;
-  const res = await apiClient.get<{ items: AvailableWatchlistItem[] }>('/deadlines/available-watchlist', { params });
-  return res.data;
-}
-
-/**
- * Batch-create a deadline group for notes and/or watchlist entries.
- *
- * @param data - Object containing dueDate, title, optional noteIds, watchlistItems, userId.
- * @returns Object with groupId, updatedNotes count, and createdDeadlines count.
- */
-export async function batchCreateDeadlines(data: {
-  dueDate: string;
-  title: string;
-  noteIds?: string[];
-  watchlistItems?: { boardId: string; issueId: string }[];
-  userId?: string;
-}): Promise<{ groupId: string; updatedNotes: number; createdDeadlines: number }> {
-  const res = await apiClient.post<{ groupId: string; updatedNotes: number; createdDeadlines: number }>('/deadlines/batch', data);
-  return res.data;
-}
-
-/**
- * Delete a deadline group and clear all associated deadlines.
- *
- * @param groupId - The deadline group UUID to delete.
- * @returns Object with deletion confirmation and counts.
- */
-export async function deleteDeadlineGroup(groupId: string): Promise<{
-  deleted: boolean;
-  clearedNotes: number;
-  deletedDeadlines: number;
-}> {
-  const res = await apiClient.delete<{
-    deleted: boolean;
-    clearedNotes: number;
-    deletedDeadlines: number;
-  }>(`/deadlines/groups/${groupId}`);
-  return res.data;
-}
-
-/**
- * Update a deadline group and its sub-items.
- *
- * @param groupId - The deadline group UUID to update.
- * @param data - Object containing optional title, dueDate, noteIds, watchlistItems, userId.
- * @returns Object with update confirmation and counts.
- */
-export async function updateDeadlineGroup(groupId: string, data: {
-  title?: string;
-  dueDate?: string;
-  noteIds?: string[];
-  watchlistItems?: { boardId: string; issueId: string }[];
-  userId?: string;
-}): Promise<{
-  groupId: string;
-  updatedNotes: number;
-  addedDeadlines: number;
-  removedDeadlines: number;
-}> {
-  const res = await apiClient.patch<{
-    groupId: string;
-    updatedNotes: number;
-    addedDeadlines: number;
-    removedDeadlines: number;
-  }>(`/deadlines/groups/${groupId}`, data);
   return res.data;
 }
 
