@@ -1,20 +1,33 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Calendar } from 'lucide-react';
-import { fetchCombinedDeadlines, type CombinedDeadline } from '../api/client';
+import { Calendar, Plus } from 'lucide-react';
+import { fetchCombinedDeadlines, deleteDeadlineGroup, fetchAppConfig, type CombinedDeadline } from '../api/client';
 import { BackButton } from '../components/BackButton';
+import { CreateDeadlineModal } from '../components/CreateDeadlineModal';
+import { DeadlineRow } from '../components/DeadlineRow';
 import { C, R, font } from '../theme';
 
 export function DeadlinesPage() {
-  const navigate = useNavigate();
   const [deadlines, setDeadlines] = useState<CombinedDeadline[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingDeadline, setEditingDeadline] = useState<CombinedDeadline | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [workspaceName, setWorkspaceName] = useState('');
+
+  useEffect(() => {
+    fetchAppConfig().then(({ workspaceName: wn }) => setWorkspaceName(wn)).catch(() => {});
+  }, []);
 
   const loadDeadlines = useCallback(async () => {
     try {
       const { deadlines: data } = await fetchCombinedDeadlines();
       const sorted = [...data].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
       setDeadlines(sorted);
+      // Initialize all multi-item deadlines as expanded by default (only on first load)
+      setExpandedGroups(prev => {
+        if (prev.size > 0) return prev; // Already initialized, preserve user state
+        return new Set(sorted.filter(dl => dl.subItems.length > 1).map(dl => dl.id));
+      });
     } catch (err) {
       console.error('Failed to load deadlines:', err);
     } finally {
@@ -28,25 +41,23 @@ export function DeadlinesPage() {
     return () => clearInterval(interval);
   }, [loadDeadlines]);
 
-  const formatDueDate = (dueDate: string) => {
-    const now = new Date();
-    const due = new Date(dueDate);
-    const diffMs = due.getTime() - now.getTime();
-    const diffHours = diffMs / (1000 * 60 * 60);
-    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-
-    if (diffMs < 0) {
-      const pastDays = Math.abs(diffDays);
-      if (pastDays === 0) return 'today';
-      if (pastDays === 1) return 'yesterday';
-      return `${pastDays}d ago`;
+  const handleDelete = useCallback(async (groupId: string) => {
+    if (!confirm('Delete this deadline and all its sub-items?')) return;
+    try {
+      await deleteDeadlineGroup(groupId);
+      await loadDeadlines();
+    } catch (err) {
+      console.error('Failed to delete deadline:', err);
     }
-    if (diffHours < 1) return 'in <1h';
-    if (diffHours < 24) return `in ${Math.ceil(diffHours)}h`;
-    if (diffDays === 0) return 'today';
-    if (diffDays === 1) return 'tomorrow';
-    return `in ${diffDays}d`;
-  };
+  }, [loadDeadlines]);
+
+  const toggleExpand = useCallback((groupId: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId); else next.add(groupId);
+      return next;
+    });
+  }, []);
 
   return (
     <div style={s.page}>
@@ -58,39 +69,38 @@ export function DeadlinesPage() {
             Deadlines
           </h1>
         </div>
+        <button style={s.createBtn} onClick={() => setShowCreateModal(true)}>
+          <Plus size={16} strokeWidth={1.5} color={C.inkMuted} />
+          Create Deadline
+        </button>
       </header>
+
+      {(showCreateModal || editingDeadline) && (
+        <CreateDeadlineModal
+          onClose={() => { setShowCreateModal(false); setEditingDeadline(null); }}
+          onCreated={() => loadDeadlines()}
+          editDeadline={editingDeadline ?? undefined}
+        />
+      )}
 
       <div style={s.content}>
         <div style={s.card}>
           {loading ? (
             <p style={s.placeholder}>Loading deadlines...</p>
           ) : deadlines.length === 0 ? (
-            <p style={s.placeholder}>No deadlines set. Add a deadline to a note to see it here.</p>
+            <p style={s.placeholder}>No deadlines set. Create a deadline to get started.</p>
           ) : (
             <div style={s.list}>
               {deadlines.map(dl => (
-                <div
-                  key={`${dl.source}-${dl.id}`}
-                  style={{
-                    ...s.item,
-                    ...(dl.isOverdue ? s.itemOverdue : {}),
-                  }}
-                  onClick={() => {
-                    if (dl.source === 'note' && dl.noteId) navigate(`/notes/${dl.noteId}`);
-                  }}
-                >
-                  <div style={s.itemLeft}>
-                    {dl.isOverdue && <span style={s.alert}>!</span>}
-                    <span style={s.itemTitle}>{dl.title}</span>
-                    <span style={s.itemSource}>{dl.source === 'note' ? 'Note' : 'Deadline'}</span>
-                  </div>
-                  <span style={{
-                    ...s.itemDue,
-                    ...(dl.isOverdue ? { color: C.danger } : {}),
-                  }}>
-                    Due: {formatDueDate(dl.dueDate)}
-                  </span>
-                </div>
+                <DeadlineRow
+                  key={dl.id}
+                  deadline={dl}
+                  workspaceName={workspaceName}
+                  isExpanded={expandedGroups.has(dl.id)}
+                  onToggleExpand={() => toggleExpand(dl.id)}
+                  onEdit={() => setEditingDeadline(dl)}
+                  onDelete={() => handleDelete(dl.id)}
+                />
               ))}
             </div>
           )}
@@ -112,6 +122,9 @@ const s: Record<string, React.CSSProperties> = {
     padding: '32px 0 24px',
     borderBottom: `1px solid ${C.hairline}`,
     marginBottom: 24,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   headerLeft: {
     display: 'flex',
@@ -127,6 +140,20 @@ const s: Record<string, React.CSSProperties> = {
     letterSpacing: '-0.6px',
     display: 'flex',
     alignItems: 'center',
+  },
+  createBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '8px 14px',
+    borderRadius: R.md,
+    backgroundColor: C.primary,
+    border: 'none',
+    color: C.inkMuted,
+    fontSize: 14,
+    fontWeight: 500,
+    fontFamily: font.text,
+    cursor: 'pointer',
   },
   content: {
     display: 'flex',
@@ -151,63 +178,5 @@ const s: Record<string, React.CSSProperties> = {
   list: {
     display: 'flex',
     flexDirection: 'column' as const,
-  },
-  item: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '16px 20px',
-    borderBottom: `1px solid ${C.hairline}`,
-    cursor: 'pointer',
-    transition: 'background-color 0.1s',
-  },
-  itemOverdue: {
-    borderLeft: `3px solid ${C.danger}`,
-    backgroundColor: `${C.danger}08`,
-  },
-  itemLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-    minWidth: 0,
-  },
-  alert: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 18,
-    height: 18,
-    borderRadius: R.pill,
-    backgroundColor: C.danger,
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: 700,
-    flexShrink: 0,
-  },
-  itemTitle: {
-    fontSize: 14,
-    fontWeight: 500,
-    color: C.inkMuted,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap' as const,
-  },
-  itemSource: {
-    fontSize: 10,
-    fontWeight: 600,
-    color: C.inkTertiary,
-    backgroundColor: C.surface2,
-    padding: '2px 6px',
-    borderRadius: R.sm,
-    flexShrink: 0,
-    textTransform: 'uppercase' as const,
-  },
-  itemDue: {
-    fontSize: 13,
-    color: C.inkSubtle,
-    flexShrink: 0,
-    marginLeft: 12,
-    fontFamily: font.text,
   },
 };

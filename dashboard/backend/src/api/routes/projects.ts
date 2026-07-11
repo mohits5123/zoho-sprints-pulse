@@ -20,20 +20,26 @@ const router = Router();
 /**
  * Extract project number from raw Zoho data.
  * 
- * Parses the rawData field (which is a JSON string) to extract the projNo field.
- * This field may be stored in either 'prop.projNo' or 'fields[index]' depending on
- * how Zoho returns the data. Returns null if parsing fails or field is missing.
+ * Zoho's API returns project data in a denormalized format:
+ * - `prop` is a mapping of field names to their indices in the `fields` array
+ *   (e.g., `{ projName: 0, owner: 5, projNo: 3 }`)
+ * - `fields` is an array of actual field values at those indices
  * 
- * @param rawData - JSON string from Zoho project data
+ * So `prop.projNo` gives us the INDEX where the project number is stored,
+ * not the project number itself. We then look up `fields[prop.projNo]` to get
+ * the actual project number value.
+ * 
+ * @param rawData - JSON string containing { fields: unknown[], prop: Record<string, number> }
  * @returns Project number as string, or null if not found
  */
 function extractProjNo(rawData: string | null): string | null {
   try {
     if (!rawData) return null;
     const rd = JSON.parse(rawData) as { fields?: unknown[]; prop?: Record<string, number> };
-    const idx = rd.prop?.projNo ?? 1;
-    const val = rd.fields?.[idx];
-    return val != null ? String(val) : null;
+    // prop.projNo is the INDEX into fields array, not the value itself
+    const projNoIndex = rd.prop?.projNo ?? 1;
+    const projNoValue = rd.fields?.[projNoIndex];
+    return projNoValue != null ? String(projNoValue) : null;
   } catch { return null; }
 }
 

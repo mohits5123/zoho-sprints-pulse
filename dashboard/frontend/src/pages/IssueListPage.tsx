@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { fetchIssues, fetchIssuesKanban, fetchProject, fetchAppConfig, toggleImportant, type IssueItem } from '../api/client';
+import { handleApiError } from '../errorHandler';
 import { IssueRow } from '../components/IssueRow';
 import { BackButton } from '../components/BackButton';
 import { C, R, font } from '../theme';
@@ -148,8 +149,8 @@ export function IssueListPage() {
                     const ORDER: Record<string, number> = { todo: 0, doing: 1, done: 2 };
                     setIssues(data.sort((a, b) => (ORDER[a.statusGroup] ?? 1) - (ORDER[b.statusGroup] ?? 1)));
                   }
-                } catch (err) {
-                  console.error('Failed to toggle important:', err);
+                } catch (err: unknown) {
+                  handleApiError(err, 'Failed to toggle important:');
                 }
               }}
             />

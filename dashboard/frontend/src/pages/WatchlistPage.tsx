@@ -4,6 +4,7 @@ import {
   fetchWatchlist, toggleImportant, fetchIssueById, fetchAppConfig, fetchProject,
   type WatchlistEntry, type IssueItem,
 } from '../api/client';
+import { handleApiError } from '../errorHandler';
 import { WatchlistCompactRow } from '../components/WatchlistCompactRow';
 import { BackButton } from '../components/BackButton';
 import { C, R, font } from '../theme';
@@ -89,8 +90,8 @@ export function WatchlistPage() {
           return next;
         });
       }
-    } catch (err) {
-      console.error('Failed to toggle important:', err);
+    } catch (err: unknown) {
+      handleApiError(err, 'Failed to toggle important:');
     }
   }, []);
 
@@ -186,6 +187,7 @@ export function WatchlistPage() {
                         watchedStates={[]}
                         workspaceName={workspaceName}
                         projNo={projNo}
+                        hasDeadline={entry.hasDeadline}
                         onToggleImportant={handleToggleImportant}
                       />
                     );

@@ -30,7 +30,25 @@ router.get('/', async (req, res) => {
       where: Object.keys(where).length > 0 ? where : undefined,
       orderBy: { important: 'desc' },
     });
-    res.json({ watchlist, total: watchlist.length });
+
+    // Fetch deadlines for all watchlist items to check if they have active deadlines
+    const issueIds = watchlist.map(w => w.issueId);
+    const deadlines = await prisma.deadline.findMany({
+      where: { 
+        issueId: { in: issueIds },
+        ...(userId ? { userId: String(userId) } : {}),
+      },
+      select: { issueId: true },
+    });
+    const issuesWithDeadlines = new Set(deadlines.map(d => d.issueId));
+
+    // Add hasDeadline flag to each watchlist entry
+    const watchlistWithDeadlines = watchlist.map(w => ({
+      ...w,
+      hasDeadline: issuesWithDeadlines.has(w.issueId),
+    }));
+
+    res.json({ watchlist: watchlistWithDeadlines, total: watchlist.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('Watchlist list failed:', msg);
@@ -111,6 +129,16 @@ router.patch('/:issueId/toggle-important', async (req, res) => {
     }
 
     if (existing.important) {
+      // Check if this issue has a deadline before allowing removal
+      const deadline = await prisma.deadline.findFirst({
+        where: { issueId, userId: existing.userId },
+      });
+      if (deadline) {
+        res.status(400).json({ 
+          error: 'Cannot unwatch ticket with active deadline. To unwatch: 1) Go to Deadlines page 2) Find and remove the deadline for this ticket 3) Then unwatch it' 
+        });
+        return;
+      }
       await prisma.watchlist.delete({ where: { id: existing.id } });
       res.json({ watchlist: { ...existing, important: false } });
       return;
