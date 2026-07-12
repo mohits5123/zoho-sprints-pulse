@@ -1,54 +1,26 @@
 import prisma from '../db/client';
 import { zohoThrottle } from './rateLimiter';
 
-/**
- * Database key used to store the timestamp of the last successful sync.
- */
 const KEY = 'last_synced_at';
-
-/**
- * Database key used as a boolean flag to indicate whether a sync operation
- * is currently running. Prevents concurrent syncs and enables recovery
- * on server restart or crash.
- */
 const SYNC_IN_PROGRESS_KEY = 'sync_in_progress';
-
-/**
- * Database key used to store the total number of API requests made during
- * the most recent sync. This value is written at the end of a sync and is
- * used to calculate progress percentage for subsequent syncs.
- */
 const SYNC_TOTAL_REQUESTS_KEY = 'sync_total_requests';
+const SYNC_START_TIME_KEY = 'sync_start_time';
+const SYNCED_SPRINT_IDS_KEY = 'synced_sprint_ids';
+const SYNC_COMPLETED_SUCCESSFULLY_KEY = 'sync_completed_successfully';
+const SYNC_FAILED_REQUESTS_KEY = 'sync_failed_requests';
 
-/**
- * Retrieves the timestamp of the most recent successful sync from the database.
- *
- * This is used to determine which records need to be fetched during incremental
- * syncs — only resources modified after this timestamp are requested from the
- * Zoho API.
- *
- * @returns An ISO-8601 string representing the last sync time, or `null` if
- *          the system has never completed a sync.
- *
- * @example
- *   const lastSync = await getLastSyncedAt();
- *   // "2024-01-15T08:30:00.000Z" or null
- */
+export interface SyncMetadata {
+  syncStartTime: string | null;
+  syncedSprintIds: string[];
+  completedSuccessfully: boolean;
+  failedRequests: number;
+}
+
 export async function getLastSyncedAt(): Promise<string | null> {
   const row = await prisma.settings.findUnique({ where: { key: KEY } });
   return row?.value ?? null;
 }
 
-/**
- * Records the current time as the last successful sync timestamp.
- *
- * Uses `upsert` to either update the existing row or create a new one if the
- * key does not yet exist (e.g., on first sync). This function is called at the
- * end of every successful sync cycle so that subsequent incremental syncs know
- * where to resume from.
- *
- * @returns The ISO-8601 string that was stored in the database.
- */
 export async function touchLastSyncedAt(): Promise<string> {
   const now = new Date().toISOString();
   await prisma.settings.upsert({
@@ -59,43 +31,49 @@ export async function touchLastSyncedAt(): Promise<string> {
   return now;
 }
 
-/**
- * Marks a sync operation as in-progress by setting the `sync_in_progress` flag
- * to `'true'` in the database.
- *
- * This serves two purposes:
- * 1. **Concurrency guard** — prevents multiple sync operations from running
- *    simultaneously by allowing callers to check this flag before starting.
- * 2. **Recovery marker** — if the server crashes mid-sync, the flag remains
- *    `'true'`, signalling that a recovery pass (via `resetSyncProgress`) may
- *    be needed on restart.
- *
- * Called at the very beginning of a sync cycle.
- */
 export async function startSync(): Promise<void> {
   await prisma.settings.upsert({
     where:  { key: SYNC_IN_PROGRESS_KEY },
     update: { value: 'true' },
     create: { key: SYNC_IN_PROGRESS_KEY, value: 'true' },
   });
+  await prisma.settings.upsert({
+    where:  { key: SYNC_START_TIME_KEY },
+    update: { value: new Date().toISOString() },
+    create: { key: SYNC_START_TIME_KEY, value: new Date().toISOString() },
+  });
+  await prisma.settings.upsert({
+    where:  { key: SYNCED_SPRINT_IDS_KEY },
+    update: { value: '[]' },
+    create: { key: SYNCED_SPRINT_IDS_KEY, value: '[]' },
+  });
+  await prisma.settings.upsert({
+    where:  { key: SYNC_COMPLETED_SUCCESSFULLY_KEY },
+    update: { value: 'false' },
+    create: { key: SYNC_COMPLETED_SUCCESSFULLY_KEY, value: 'false' },
+  });
+  await prisma.settings.upsert({
+    where:  { key: SYNC_FAILED_REQUESTS_KEY },
+    update: { value: '0' },
+    create: { key: SYNC_FAILED_REQUESTS_KEY, value: '0' },
+  });
 }
 
-/**
- * Marks a sync operation as complete by clearing the in-progress flag and
- * persisting the total number of API requests made during the sync.
- *
- * This function performs two database writes:
- * 1. Clears the `sync_in_progress` flag (`'false'`), allowing new syncs to start.
- * 2. Stores the `totalRequests` count under `sync_total_requests`, which is
- *    later read by `getSyncProgress` to compute the progress percentage for
- *    subsequent syncs.
- *
- * @param totalRequests — The total number of API requests that were made
- *                        during this sync cycle.
- *
- * @throws If a database write fails (Prisma will throw).
- */
-export async function completeSync(totalRequests: number): Promise<void> {
+export async function recordSyncedSprint(sprintId: string): Promise<void> {
+  const row = await prisma.settings.findUnique({ where: { key: SYNCED_SPRINT_IDS_KEY } });
+  const current: string[] = row ? JSON.parse(row.value) : [];
+  if (!current.includes(sprintId)) {
+    current.push(sprintId);
+    await prisma.settings.upsert({
+      where:  { key: SYNCED_SPRINT_IDS_KEY },
+      update: { value: JSON.stringify(current) },
+      create: { key: SYNCED_SPRINT_IDS_KEY, value: JSON.stringify(current) },
+    });
+  }
+}
+
+export async function completeSync(totalRequests: number, failedRequests: number): Promise<void> {
+  const completedSuccessfully = failedRequests === 0;
   await prisma.settings.upsert({
     where:  { key: SYNC_IN_PROGRESS_KEY },
     update: { value: 'false' },
@@ -106,6 +84,31 @@ export async function completeSync(totalRequests: number): Promise<void> {
     update: { value: String(totalRequests) },
     create: { key: SYNC_TOTAL_REQUESTS_KEY, value: String(totalRequests) },
   });
+  await prisma.settings.upsert({
+    where:  { key: SYNC_COMPLETED_SUCCESSFULLY_KEY },
+    update: { value: completedSuccessfully ? 'true' : 'false' },
+    create: { key: SYNC_COMPLETED_SUCCESSFULLY_KEY, value: completedSuccessfully ? 'true' : 'false' },
+  });
+  await prisma.settings.upsert({
+    where:  { key: SYNC_FAILED_REQUESTS_KEY },
+    update: { value: String(failedRequests) },
+    create: { key: SYNC_FAILED_REQUESTS_KEY, value: String(failedRequests) },
+  });
+}
+
+export async function getSyncMetadata(): Promise<SyncMetadata> {
+  const [startTimeRow, sprintIdsRow, completedRow, failedRow] = await Promise.all([
+    prisma.settings.findUnique({ where: { key: SYNC_START_TIME_KEY } }),
+    prisma.settings.findUnique({ where: { key: SYNCED_SPRINT_IDS_KEY } }),
+    prisma.settings.findUnique({ where: { key: SYNC_COMPLETED_SUCCESSFULLY_KEY } }),
+    prisma.settings.findUnique({ where: { key: SYNC_FAILED_REQUESTS_KEY } }),
+  ]);
+  return {
+    syncStartTime: startTimeRow?.value ?? null,
+    syncedSprintIds: sprintIdsRow ? JSON.parse(sprintIdsRow.value) : [],
+    completedSuccessfully: completedRow?.value === 'true',
+    failedRequests: failedRow ? parseInt(failedRow.value, 10) : 0,
+  };
 }
 
 /**

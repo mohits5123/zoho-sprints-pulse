@@ -56,7 +56,7 @@ import { config } from '../config';
 import prisma from '../db/client';
 import { recordBurndownSnapshot } from './burndownSnapshots';
 import { zohoThrottle } from './rateLimiter';
-import { startSync, completeSync, touchLastSyncedAt } from './syncStatus';
+import { startSync, completeSync, touchLastSyncedAt, recordSyncedSprint, getSyncMetadata } from './syncStatus';
 import { checkWatchedIssueStatusChanges, checkNoteDeadlineNotifications } from './activitySync';
 
 
@@ -1073,6 +1073,8 @@ async function syncIssues(
             createdAt,
             endDate,
             syncedAt: new Date(),
+            missingSyncCount: 0,
+            deletedAt: null,
           },
           create: {
             zohoId: itemId,
@@ -1087,6 +1089,9 @@ async function syncIssues(
             assigneeIds: JSON.stringify(assigneeIds),
             createdAt,
             endDate,
+            syncedAt: new Date(),
+            missingSyncCount: 0,
+            deletedAt: null,
           },
         });
 
@@ -1400,6 +1405,7 @@ export async function syncAll(): Promise<number> {
 
         // Phase 3c: Sync issues for this sprint
         await syncIssues(teamId, project.zohoId, sprint.zohoId, sprint.status);
+        await recordSyncedSprint(sprint.zohoId);
 
         // Record daily burndown snapshot (upserts — safe to call on every sync)
         const doneCount = Object.entries(statusBreakdown)
@@ -1509,6 +1515,7 @@ export async function syncAll(): Promise<number> {
         
         // Sync issues for the kanban board (treated as "active" sprint)
         await syncIssues(teamId, project.zohoId, kanbanBoardId, 'active');
+        await recordSyncedSprint(kanbanBoardId);
 
         // Create/update Sprint record so queryKanbanBoardIssues can identify this board
         // The statusCode=7 marker is used by queryKanbanBoardIssues to filter kanban issues
@@ -1595,6 +1602,137 @@ export async function syncAll(): Promise<number> {
 // Keep old export for backwards compatibility
 export const syncSprintHealth = syncAll;
 
+const DELETION_THRESHOLD = 2;
+
+async function detectAndRemoveDeletedIssues(): Promise<void> {
+  const metadata = await getSyncMetadata();
+
+  if (!metadata.completedSuccessfully || metadata.failedRequests > 0) {
+    console.log('[Deletion Detection] Skipping: sync had failures or did not complete successfully');
+    return;
+  }
+
+  if (!metadata.syncStartTime) {
+    console.log('[Deletion Detection] Skipping: no sync start time recorded');
+    return;
+  }
+
+  const syncStartTime = new Date(metadata.syncStartTime);
+  const syncedSprintIds = metadata.syncedSprintIds;
+
+  if (syncedSprintIds.length === 0) {
+    console.log('[Deletion Detection] Skipping: no sprints were synced');
+    return;
+  }
+
+  const activeSprints = await prisma.sprint.findMany({
+    where: {
+      zohoId: { in: syncedSprintIds },
+      OR: [
+        { status: 'active', rawData: { not: null } },
+      ],
+    },
+    select: { zohoId: true, rawData: true },
+  });
+
+  const activeSprintIds = activeSprints
+    .filter(s => {
+      if (!s.rawData) return false;
+      try {
+        const raw = JSON.parse(s.rawData);
+        const statusCode = raw?.sprint?.statusCode;
+        return statusCode === 2 || statusCode === 7;
+      } catch {
+        return false;
+      }
+    })
+    .map(s => s.zohoId);
+
+  if (activeSprintIds.length === 0) {
+    console.log('[Deletion Detection] Skipping: no active sprints or kanban boards to check');
+    return;
+  }
+
+  const missedIssues = await prisma.issue.findMany({
+    where: {
+      sprintZohoId: { in: activeSprintIds },
+      syncedAt: { lt: syncStartTime },
+      deletedAt: null,
+    },
+    select: { zohoId: true, itemNo: true, title: true, missingSyncCount: true, sprintZohoId: true },
+  });
+
+  if (missedIssues.length === 0) {
+    console.log('[Deletion Detection] No missed issues detected');
+    return;
+  }
+
+  console.log(`[Deletion Detection] Found ${missedIssues.length} missed issues`);
+
+  const issuesToIncrement = missedIssues.map(i => i.zohoId);
+  await prisma.issue.updateMany({
+    where: { zohoId: { in: issuesToIncrement } },
+    data: { missingSyncCount: { increment: 1 } },
+  });
+
+  const issuesToDelete = await prisma.issue.findMany({
+    where: {
+      zohoId: { in: issuesToIncrement },
+      missingSyncCount: { gte: DELETION_THRESHOLD },
+      deletedAt: null,
+    },
+    select: { zohoId: true, itemNo: true, title: true, sprintZohoId: true },
+  });
+
+  if (issuesToDelete.length === 0) {
+    console.log('[Deletion Detection] No issues reached deletion threshold');
+    return;
+  }
+
+  const deletedAt = new Date();
+  const deletedIds = issuesToDelete.map(i => i.zohoId);
+
+  await prisma.issue.updateMany({
+    where: { zohoId: { in: deletedIds } },
+    data: { deletedAt },
+  });
+
+  console.log(`[Deletion Detection] Soft-deleted ${issuesToDelete.length} issues after ${DELETION_THRESHOLD} consecutive misses:`);
+  issuesToDelete.forEach(issue => {
+    console.log(`  - ${issue.itemNo}: ${issue.title} (sprint: ${issue.sprintZohoId})`);
+  });
+
+  await createDeletionNotifications(issuesToDelete, deletedAt);
+}
+
+async function createDeletionNotifications(
+  issues: Array<{ zohoId: string; itemNo: string; title: string; sprintZohoId: string }>,
+  deletedAt: Date
+): Promise<void> {
+  const projectMap = await prisma.sprint.findMany({
+    where: { zohoId: { in: issues.map(i => i.sprintZohoId) } },
+    select: { zohoId: true, projectZohoId: true },
+  });
+  const sprintToProject = new Map(projectMap.map(s => [s.zohoId, s.projectZohoId]));
+
+  const notifications = issues.map(issue => ({
+    id: `deleted_${issue.zohoId}_${deletedAt.getTime()}`,
+    userId: 'system',
+    type: 'issue_deleted',
+    issueId: issue.zohoId,
+    boardId: sprintToProject.get(issue.sprintZohoId) ?? null,
+    oldStatus: '',
+    newStatus: '',
+    read: false,
+    createdAt: deletedAt,
+  }));
+
+  if (notifications.length > 0) {
+    await prisma.activityNotification.createMany({ data: notifications });
+    console.log(`[Deletion Detection] Created ${notifications.length} admin notifications`);
+  }
+}
+
 /**
  * Full synchronization wrapper that tracks sync state for the UI progress bar.
  * 
@@ -1610,20 +1748,27 @@ export const syncSprintHealth = syncAll;
  * **Lifecycle**:
  * 1. `startSync()` — marks sync as in-progress, resets progress bar state
  * 2. `syncAll()` — performs the actual data synchronization
- * 3. `touchLastSyncedAt()` — updates the timestamp of the last successful sync
- * 4. `completeSync(sent)` — marks sync as complete with total API request count
+ * 3. `detectAndRemoveDeletedIssues()` — soft-deletes issues missing from Zoho
+ * 4. `touchLastSyncedAt()` — updates the timestamp of the last successful sync
+ * 5. `completeSync(sent, failed)` — marks sync as complete with request counts
+ * 6. `checkWatchedIssueStatusChanges()` — creates notifications for watched issue changes
+ * 7. `checkNoteDeadlineNotifications()` — creates notifications for note deadlines
  * 
  * @returns The total number of sprints successfully synced (same as `syncAll()`)
  * @see syncAll - The underlying sync logic without lifecycle tracking
  */
 export async function runFullSync(): Promise<number> {
   await startSync();
-  const synced = await syncAll();
-  await touchLastSyncedAt();
-  await completeSync(zohoThrottle.sent);
-  // Check for status changes in watched issues and create notifications
-  await checkWatchedIssueStatusChanges();
-  // Check for note deadline notifications
-  await checkNoteDeadlineNotifications();
-  return synced;
+  try {
+    const synced = await syncAll();
+    await detectAndRemoveDeletedIssues();
+    await touchLastSyncedAt();
+    await completeSync(zohoThrottle.sent, zohoThrottle.failed);
+    await checkWatchedIssueStatusChanges();
+    await checkNoteDeadlineNotifications();
+    return synced;
+  } catch (error) {
+    await completeSync(zohoThrottle.sent, zohoThrottle.failed);
+    throw error;
+  }
 }

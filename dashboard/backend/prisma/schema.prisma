@@ -62,19 +62,21 @@ model Epic {
 }
 
 model Issue {
-  zohoId        String   @id
-  sprintZohoId  String
-  projectZohoId String
-  itemNo        String
-  title         String
-  status        String
-  statusGroup   String
-  epicZohoId    String?
-  creatorZohoId String?
-  assigneeIds   String
-  createdAt     String?
-  endDate       String?
-  syncedAt      DateTime @default(now()) @updatedAt
+  zohoId           String    @id
+  sprintZohoId     String
+  projectZohoId    String
+  itemNo           String
+  title            String
+  status           String
+  statusGroup      String
+  epicZohoId       String?
+  creatorZohoId    String?
+  assigneeIds      String
+  createdAt        String?
+  endDate          String?
+  syncedAt         DateTime  @default(now()) @updatedAt
+  deletedAt        DateTime?
+  missingSyncCount Int       @default(0)
 }
 
 model Settings {

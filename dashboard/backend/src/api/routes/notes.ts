@@ -224,6 +224,7 @@ router.get('/search-issues', async (req, res) => {
 
     const where: Record<string, unknown> = {
       title: { contains: q },
+      deletedAt: null,
     };
     if (boardId) where.projectZohoId = boardId;
 
