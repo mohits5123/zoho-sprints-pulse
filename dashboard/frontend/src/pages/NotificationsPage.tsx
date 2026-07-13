@@ -182,8 +182,10 @@ export function NotificationsPage() {
                           <>Deadline reminder: <strong>{noteTitle ?? 'Note'}</strong> — deadline is tomorrow</>
                         ) : notif.type === 'deadline_day_of' ? (
                           <>Deadline today: <strong>{noteTitle ?? 'Note'}</strong> — due today</>
+                        ) : notif.type === 'issue_deleted' ? (
+                          <>{notif.message || 'An issue was soft-deleted.'}</>
                         ) : (
-                          <>Notification</>
+                          <>{notif.message || 'Notification'}</>
                         )}
                       </div>
                       <div style={s.itemTime}>

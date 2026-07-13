@@ -156,6 +156,7 @@ model ActivityNotification {
   noteId    String?                              // note UUID if related to a note deadline
   oldStatus String   @default("")
   newStatus String   @default("")
+  message   String   @default("")  // Human-readable detail (e.g. soft-deleted issue no. + zohoId)
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
 

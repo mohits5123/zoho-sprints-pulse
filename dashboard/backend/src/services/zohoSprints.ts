@@ -1728,6 +1728,7 @@ async function createDeletionNotifications(
     boardId: sprintToProject.get(issue.sprintZohoId) ?? null,
     oldStatus: '',
     newStatus: '',
+    message: `Issue ${issue.itemNo || '(no number)'} "${issue.title}" was soft-deleted after going missing from Zoho for ${DELETION_THRESHOLD} consecutive syncs (zohoId: ${issue.zohoId}).`,
     read: false,
     createdAt: deletedAt,
   }));

@@ -1385,6 +1385,7 @@ export interface ActivityNotification {
   noteId:    string | null;
   oldStatus: string;
   newStatus: string;
+  message:   string;
   read:      boolean;
   createdAt: string;
 }
