@@ -1604,11 +1604,16 @@ export const syncSprintHealth = syncAll;
 
 const DELETION_THRESHOLD = 2;
 
-async function detectAndRemoveDeletedIssues(): Promise<void> {
+async function detectAndRemoveDeletedIssues(failedRequests: number): Promise<void> {
   const metadata = await getSyncMetadata();
 
-  if (!metadata.completedSuccessfully || metadata.failedRequests > 0) {
-    console.log('[Deletion Detection] Skipping: sync had failures or did not complete successfully');
+  // Note: we take the failure count as a parameter rather than reading it from
+  // metadata. completeSync() (which persists completedSuccessfully / failedRequests)
+  // runs *after* this function in runFullSync(), so the persisted values here still
+  // reflect the reset written by startSync(). The live throttle counters are the
+  // source of truth for whether this sync pass was clean.
+  if (failedRequests > 0) {
+    console.log('[Deletion Detection] Skipping: sync had failed requests');
     return;
   }
 
@@ -1761,7 +1766,7 @@ export async function runFullSync(): Promise<number> {
   await startSync();
   try {
     const synced = await syncAll();
-    await detectAndRemoveDeletedIssues();
+    await detectAndRemoveDeletedIssues(zohoThrottle.failed);
     await touchLastSyncedAt();
     await completeSync(zohoThrottle.sent, zohoThrottle.failed);
     await checkWatchedIssueStatusChanges();
