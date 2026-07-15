@@ -1275,7 +1275,7 @@ export function clearZohoCache(): void {
  * 
  * @returns The total number of sprints successfully synced across all projects
  */
-export async function syncAll(): Promise<number> {
+export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Map<string, number> }> {
   clearZohoCache();      // Ensure fresh status maps on this sync run
   zohoThrottle.resetStats();  // Reset rate limiter tracking
   
@@ -1292,6 +1292,7 @@ export async function syncAll(): Promise<number> {
   console.log(`\nSyncing ${scrumProjects.length} scrum + ${kanbanProjects.length} kanban projects`);
 
   let synced = 0;
+  const sprintIssueCounts = new Map<string, number>();
 
   // ── Scrum projects ──────────────────────────────────────────────────────────
   
@@ -1329,7 +1330,8 @@ export async function syncAll(): Promise<number> {
           },
         });
         // Sync backlog issues to the Issue table using backlogId as sprintZohoId
-        await syncIssues(teamId, project.zohoId, backlogResult.backlogId, 'active');
+        const backlogSynced = await syncIssues(teamId, project.zohoId, backlogResult.backlogId, 'active');
+        trackedSyncCount(sprintIssueCounts, backlogResult.backlogId, backlogSynced);
       }
 
       const sprints = await fetchSprintsForProject(teamId, project.zohoId);
@@ -1404,7 +1406,8 @@ export async function syncAll(): Promise<number> {
         });
 
         // Phase 3c: Sync issues for this sprint
-        await syncIssues(teamId, project.zohoId, sprint.zohoId, sprint.status);
+        const sprintSynced = await syncIssues(teamId, project.zohoId, sprint.zohoId, sprint.status);
+        trackedSyncCount(sprintIssueCounts, sprint.zohoId, sprintSynced);
         await recordSyncedSprint(sprint.zohoId);
 
         // Record daily burndown snapshot (upserts — safe to call on every sync)
@@ -1441,7 +1444,8 @@ export async function syncAll(): Promise<number> {
               statusBreakdown: JSON.stringify(statusBreakdown),
             },
           });
-          await syncIssues(teamId, project.zohoId, completed.zohoId, 'completed');
+          const completedSynced = await syncIssues(teamId, project.zohoId, completed.zohoId, 'completed');
+          trackedSyncCount(sprintIssueCounts, completed.zohoId, completedSynced);
           const doneCount = Object.entries(statusBreakdown)
             .filter(([name]) => statusGroups[name] === 'done')
             .reduce((sum, [, n]) => sum + n, 0);
@@ -1494,7 +1498,8 @@ export async function syncAll(): Promise<number> {
 
       // Sync backlog issues to the Issue table using backlogId as sprintZohoId
       if (backlogResult !== null) {
-        await syncIssues(teamId, project.zohoId, backlogResult.backlogId, 'active');
+        const kanbanBacklogSynced = await syncIssues(teamId, project.zohoId, backlogResult.backlogId, 'active');
+        trackedSyncCount(sprintIssueCounts, backlogResult.backlogId, kanbanBacklogSynced);
       }
 
       // Find kanban board sprint (type=[7] - special Zoho sprint type for boards)
@@ -1514,7 +1519,8 @@ export async function syncAll(): Promise<number> {
         }
         
         // Sync issues for the kanban board (treated as "active" sprint)
-        await syncIssues(teamId, project.zohoId, kanbanBoardId, 'active');
+        const kanbanSynced = await syncIssues(teamId, project.zohoId, kanbanBoardId, 'active');
+        trackedSyncCount(sprintIssueCounts, kanbanBoardId, kanbanSynced);
         await recordSyncedSprint(kanbanBoardId);
 
         // Create/update Sprint record so queryKanbanBoardIssues can identify this board
@@ -1596,15 +1602,27 @@ export async function syncAll(): Promise<number> {
 
   zohoThrottle.printSummary();
   
-  return synced;
+  return { synced, sprintIssueCounts };
 }
 
 // Keep old export for backwards compatibility
 export const syncSprintHealth = syncAll;
 
 const DELETION_THRESHOLD = 2;
+const DROP_FRACTION_THRESHOLD = 0.5;
 
-async function detectAndRemoveDeletedIssues(failedRequests: number): Promise<void> {
+function trackedSyncCount(
+  counts: Map<string, number>,
+  sprintId: string,
+  count: number,
+): void {
+  counts.set(sprintId, count);
+}
+
+async function detectAndRemoveDeletedIssues(
+  failedRequests: number,
+  sprintIssueCounts: Map<string, number>,
+): Promise<void> {
   const metadata = await getSyncMetadata();
 
   // Note: we take the failure count as a parameter rather than reading it from
@@ -1637,7 +1655,7 @@ async function detectAndRemoveDeletedIssues(failedRequests: number): Promise<voi
         { status: 'active', rawData: { not: null } },
       ],
     },
-    select: { zohoId: true, rawData: true },
+    select: { zohoId: true, rawData: true, totalTickets: true },
   });
 
   const activeSprintIds = activeSprints
@@ -1658,9 +1676,32 @@ async function detectAndRemoveDeletedIssues(failedRequests: number): Promise<voi
     return;
   }
 
+  const guardedSprintIds = activeSprintIds.filter(sprintId => {
+    const currentCount = sprintIssueCounts.get(sprintId) ?? 0;
+    if (currentCount === 0) {
+      console.log(`[Deletion Detection] Skipping sprint ${sprintId}: Zoho returned 0 issues (possible transient empty response)`);
+      return false;
+    }
+    const sprint = activeSprints.find(s => s.zohoId === sprintId);
+    const previousCount = sprint?.totalTickets ?? 0;
+    if (previousCount > 0) {
+      const drop = (previousCount - currentCount) / previousCount;
+      if (drop > DROP_FRACTION_THRESHOLD) {
+        console.log(`[Deletion Detection] Skipping sprint ${sprintId}: issue count dropped ${Math.round(drop * 100)}% (${previousCount} → ${currentCount})`);
+        return false;
+      }
+    }
+    return true;
+  });
+
+  if (guardedSprintIds.length === 0) {
+    console.log('[Deletion Detection] Skipping: all active sprints failed sanity guard');
+    return;
+  }
+
   const missedIssues = await prisma.issue.findMany({
     where: {
-      sprintZohoId: { in: activeSprintIds },
+      sprintZohoId: { in: guardedSprintIds },
       syncedAt: { lt: syncStartTime },
       deletedAt: null,
     },
@@ -1766,8 +1807,8 @@ async function createDeletionNotifications(
 export async function runFullSync(): Promise<number> {
   await startSync();
   try {
-    const synced = await syncAll();
-    await detectAndRemoveDeletedIssues(zohoThrottle.failed);
+    const { synced, sprintIssueCounts } = await syncAll();
+    await detectAndRemoveDeletedIssues(zohoThrottle.failed, sprintIssueCounts);
     await touchLastSyncedAt();
     await completeSync(zohoThrottle.sent, zohoThrottle.failed);
     await checkWatchedIssueStatusChanges();
