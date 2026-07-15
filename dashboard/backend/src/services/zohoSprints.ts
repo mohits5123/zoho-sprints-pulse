@@ -56,7 +56,7 @@ import { config } from '../config';
 import prisma from '../db/client';
 import { recordBurndownSnapshot } from './burndownSnapshots';
 import { zohoThrottle } from './rateLimiter';
-import { startSync, completeSync, touchLastSyncedAt, recordSyncedSprint, getSyncMetadata } from './syncStatus';
+import { startSync, completeSync, touchLastSyncedAt, recordSyncedSprint, flushSyncedSprintIds, getSyncMetadata } from './syncStatus';
 import { checkWatchedIssueStatusChanges, checkNoteDeadlineNotifications } from './activitySync';
 
 
@@ -1408,7 +1408,7 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
         // Phase 3c: Sync issues for this sprint
         const sprintSynced = await syncIssues(teamId, project.zohoId, sprint.zohoId, sprint.status);
         trackedSyncCount(sprintIssueCounts, sprint.zohoId, sprintSynced);
-        await recordSyncedSprint(sprint.zohoId);
+        recordSyncedSprint(sprint.zohoId);
 
         // Record daily burndown snapshot (upserts — safe to call on every sync)
         const doneCount = Object.entries(statusBreakdown)
@@ -1521,7 +1521,7 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
         // Sync issues for the kanban board (treated as "active" sprint)
         const kanbanSynced = await syncIssues(teamId, project.zohoId, kanbanBoardId, 'active');
         trackedSyncCount(sprintIssueCounts, kanbanBoardId, kanbanSynced);
-        await recordSyncedSprint(kanbanBoardId);
+        recordSyncedSprint(kanbanBoardId);
 
         // Create/update Sprint record so queryKanbanBoardIssues can identify this board
         // The statusCode=7 marker is used by queryKanbanBoardIssues to filter kanban issues
@@ -1808,6 +1808,7 @@ export async function runFullSync(): Promise<number> {
   await startSync();
   try {
     const { synced, sprintIssueCounts } = await syncAll();
+    await flushSyncedSprintIds();
     await detectAndRemoveDeletedIssues(zohoThrottle.failed, sprintIssueCounts);
     await touchLastSyncedAt();
     await completeSync(zohoThrottle.sent, zohoThrottle.failed);

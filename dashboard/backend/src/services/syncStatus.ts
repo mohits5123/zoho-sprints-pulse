@@ -9,6 +9,8 @@ const SYNCED_SPRINT_IDS_KEY = 'synced_sprint_ids';
 const SYNC_COMPLETED_SUCCESSFULLY_KEY = 'sync_completed_successfully';
 const SYNC_FAILED_REQUESTS_KEY = 'sync_failed_requests';
 
+const pendingSyncedSprintIds = new Set<string>();
+
 export interface SyncMetadata {
   syncStartTime: string | null;
   syncedSprintIds: string[];
@@ -59,17 +61,19 @@ export async function startSync(): Promise<void> {
   });
 }
 
-export async function recordSyncedSprint(sprintId: string): Promise<void> {
-  const row = await prisma.settings.findUnique({ where: { key: SYNCED_SPRINT_IDS_KEY } });
-  const current: string[] = row ? JSON.parse(row.value) : [];
-  if (!current.includes(sprintId)) {
-    current.push(sprintId);
-    await prisma.settings.upsert({
-      where:  { key: SYNCED_SPRINT_IDS_KEY },
-      update: { value: JSON.stringify(current) },
-      create: { key: SYNCED_SPRINT_IDS_KEY, value: JSON.stringify(current) },
-    });
-  }
+export function recordSyncedSprint(sprintId: string): void {
+  pendingSyncedSprintIds.add(sprintId);
+}
+
+export async function flushSyncedSprintIds(): Promise<void> {
+  if (pendingSyncedSprintIds.size === 0) return;
+  const ids = Array.from(pendingSyncedSprintIds);
+  pendingSyncedSprintIds.clear();
+  await prisma.settings.upsert({
+    where:  { key: SYNCED_SPRINT_IDS_KEY },
+    update: { value: JSON.stringify(ids) },
+    create: { key: SYNCED_SPRINT_IDS_KEY, value: JSON.stringify(ids) },
+  });
 }
 
 export async function completeSync(totalRequests: number, failedRequests: number): Promise<void> {
