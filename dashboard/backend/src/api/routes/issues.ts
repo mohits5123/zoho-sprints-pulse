@@ -6,9 +6,40 @@
  */
 
 import { Router } from 'express';
+import prisma from '../../db/client';
 import { queryIssueById } from '../../services/issueQueries';
 
 const router = Router();
+
+/**
+ * GET /api/issues/deleted — Fetch all soft-deleted issues.
+ * @route GET /api/issues/deleted
+ * @method GET
+ * @returns {Object} - { issues: Array }
+ */
+router.get('/deleted', async (_req, res) => {
+  try {
+    const issues = await prisma.issue.findMany({
+      where: { deletedAt: { not: null } },
+      orderBy: { deletedAt: 'desc' },
+      select: {
+        zohoId: true,
+        itemNo: true,
+        title: true,
+        status: true,
+        sprintZohoId: true,
+        projectZohoId: true,
+        deletedAt: true,
+        missingSyncCount: true,
+      },
+    });
+    res.json({ issues });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('Deleted issues fetch failed:', msg);
+    res.status(500).json({ error: msg });
+  }
+});
 
 /**
  * GET /api/issues/:issueId — Fetch a single issue by its Zoho ID.

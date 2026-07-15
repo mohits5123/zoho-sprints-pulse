@@ -419,7 +419,7 @@ export async function queryIssues(
   const { staleDays = 7, watchedStates = [], watchlisted = false } = opts;
 
   const dbIssues = await prisma.issue.findMany({
-    where: { projectZohoId, sprintZohoId },
+    where: { projectZohoId, sprintZohoId, deletedAt: null },
   });
 
   const userMap = await buildUserMap();
@@ -488,7 +488,7 @@ export async function queryKanbanBoardIssues(
   
   // Filter to only kanban board issues (exclude backlog)
   const dbIssues = await prisma.issue.findMany({
-    where: { projectZohoId },
+    where: { projectZohoId, deletedAt: null },
   });
   
   const userMap = await buildUserMap();
@@ -560,6 +560,7 @@ export async function queryBacklogIssues(
     where: {
       projectZohoId,
       sprintZohoId: project.backlogZohoId,
+      deletedAt: null,
     },
   });
   
@@ -597,7 +598,7 @@ export async function queryIssueById(
   watchedStates: string[] = [],
 ): Promise<IssueItem | null> {
   const dbIssue = await prisma.issue.findUnique({
-    where: { zohoId: issueZohoId },
+    where: { zohoId: issueZohoId, deletedAt: null },
   });
 
   if (!dbIssue) return null;
@@ -669,7 +670,7 @@ export async function querySprintEpics(
 ): Promise<{ epics: EpicBreakdown[]; statusGroups: Record<string, 'todo' | 'doing' | 'done'> }> {
   // Fetch all data needed in parallel for efficiency
   const [dbIssues, dbEpics, project, userMap] = await Promise.all([
-    prisma.issue.findMany({ where: { projectZohoId, sprintZohoId } }),
+    prisma.issue.findMany({ where: { projectZohoId, sprintZohoId, deletedAt: null } }),
     prisma.epic.findMany({ where: { projectZohoId } }),
     prisma.project.findUnique({ where: { zohoId: projectZohoId } }),
     buildUserMap(),
@@ -841,7 +842,7 @@ export async function queryTeamLoad(staleDays: number = 7): Promise<{
 
   // Single DB query: fetch all issues across ALL active sprints at once
   const dbIssues = await prisma.issue.findMany({
-    where: { sprintZohoId: { in: activeSprintZohoIds } },
+    where: { sprintZohoId: { in: activeSprintZohoIds }, deletedAt: null },
   });
 
   const userMap = await buildUserMap();
@@ -1242,6 +1243,7 @@ export async function queryBacklogStats(
       where: {
         projectZohoId,
         statusGroup: 'todo',
+        deletedAt: null,
       },
     });
   } else {
@@ -1262,6 +1264,7 @@ export async function queryBacklogStats(
       where: {
         projectZohoId,
         sprintZohoId: backlogProject.backlogZohoId,
+        deletedAt: null,
       },
     });
   }

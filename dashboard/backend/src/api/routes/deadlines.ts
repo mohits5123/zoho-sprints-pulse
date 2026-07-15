@@ -220,7 +220,7 @@ router.get('/combined', async (req, res) => {
     const [issues, projects] = await Promise.all([
       issueIds.size > 0
         ? prisma.issue.findMany({
-            where: { zohoId: { in: Array.from(issueIds) } },
+            where: { zohoId: { in: Array.from(issueIds) }, deletedAt: null },
             select: {
               zohoId: true,
               itemNo: true,
@@ -413,7 +413,7 @@ router.get('/available-watchlist', async (req, res) => {
 
     const issueIds = available.map(w => w.issueId);
     const issues = await prisma.issue.findMany({
-      where: { zohoId: { in: issueIds } },
+      where: { zohoId: { in: issueIds }, deletedAt: null },
       select: { zohoId: true, itemNo: true, title: true },
     });
     const issueMap = new Map(issues.map(i => [i.zohoId, i]));

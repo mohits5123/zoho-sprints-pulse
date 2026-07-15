@@ -14,7 +14,6 @@ dashboard/frontend/dist/
 # Database
 prisma/dev.db
 *.db
-*.sql
 
 # IDE
 .idea/
@@ -33,6 +32,8 @@ CLAUDE.md
 DB_REVIEW.md
 .github
 .opencode/
+.mcp.json
+.claude/
 
 # Documentation guidelines (reference file)
 docs/*
