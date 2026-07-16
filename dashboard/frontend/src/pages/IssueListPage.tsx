@@ -34,6 +34,10 @@ export function IssueListPage() {
   const [boardType, setBoardType]   = useState<'scrum' | 'kanban' | 'other' | null>(null);
 
   useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
+  useEffect(() => {
     fetchAppConfig().then(({ workspaceName: wn }) => setWorkspaceName(wn)).catch(() => {});
   }, []);
 

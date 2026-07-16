@@ -241,7 +241,7 @@ const s: Record<string, React.CSSProperties> = {
   dates: { margin: 0, fontSize: 12, color: C.inkTertiary, fontFamily: font.text },
   users: { display: 'flex', flexWrap: 'wrap' as const, gap: 4 },
   totalLine: { margin: 0 },
-  totalCount: { fontSize: 28, fontWeight: 600, color: C.inkMuted, lineHeight: 1, fontFamily: font.display, letterSpacing: '-0.6px' },
+  totalCount: { fontSize: 24, fontWeight: 600, color: C.inkMuted, lineHeight: 1, fontFamily: font.display, letterSpacing: '-0.6px' },
   totalLabel: { fontSize: 14, color: C.inkSubtle, fontFamily: font.text },
   breakdown: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 4 },
   breakdownRow: { display: 'flex', alignItems: 'center', gap: 7 },

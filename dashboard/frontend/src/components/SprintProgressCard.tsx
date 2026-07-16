@@ -71,6 +71,7 @@ export function SprintProgressCard({ epics, statusGroups, onGroupClick, isKanban
           strokeWidth={6}
           centerLabel={`${pct}%`}
           centerSub={`${totals.done} / ${total} done`}
+          centerLabelSize={24}
         />
       </div>
 
