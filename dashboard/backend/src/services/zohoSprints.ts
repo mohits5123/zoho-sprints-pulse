@@ -1275,7 +1275,7 @@ export function clearZohoCache(): void {
  * 
  * @returns The total number of sprints successfully synced across all projects
  */
-export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Map<string, number> }> {
+export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Map<string, number>; previousSprintIssueCounts: Map<string, number> }> {
   clearZohoCache();      // Ensure fresh status maps on this sync run
   zohoThrottle.resetStats();  // Reset rate limiter tracking
   
@@ -1293,6 +1293,7 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
 
   let synced = 0;
   const sprintIssueCounts = new Map<string, number>();
+  const previousSprintIssueCounts = new Map<string, number>();
 
   // ── Scrum projects ──────────────────────────────────────────────────────────
   
@@ -1382,6 +1383,14 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
         }
 
         const totalTickets = Object.values(statusBreakdown).reduce((a, b) => a + b, 0);
+
+        const existingSprint = await prisma.sprint.findUnique({
+          where: { zohoId: sprint.zohoId },
+          select: { totalTickets: true },
+        });
+        if (existingSprint) {
+          previousSprintIssueCounts.set(sprint.zohoId, existingSprint.totalTickets);
+        }
 
         await prisma.sprint.upsert({
           where:  { zohoId: sprint.zohoId },
@@ -1602,7 +1611,7 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
 
   zohoThrottle.printSummary();
   
-  return { synced, sprintIssueCounts };
+  return { synced, sprintIssueCounts, previousSprintIssueCounts };
 }
 
 // Keep old export for backwards compatibility
@@ -1622,6 +1631,7 @@ function trackedSyncCount(
 async function detectAndRemoveDeletedIssues(
   failedRequests: number,
   sprintIssueCounts: Map<string, number>,
+  previousSprintIssueCounts: Map<string, number>,
 ): Promise<void> {
   const metadata = await getSyncMetadata();
 
@@ -1682,8 +1692,7 @@ async function detectAndRemoveDeletedIssues(
       console.log(`[Deletion Detection] Skipping sprint ${sprintId}: Zoho returned 0 issues (possible transient empty response)`);
       return false;
     }
-    const sprint = activeSprints.find(s => s.zohoId === sprintId);
-    const previousCount = sprint?.totalTickets ?? 0;
+    const previousCount = previousSprintIssueCounts.get(sprintId) ?? 0;
     if (previousCount > 0) {
       const drop = (previousCount - currentCount) / previousCount;
       if (drop > DROP_FRACTION_THRESHOLD) {
@@ -1807,9 +1816,9 @@ async function createDeletionNotifications(
 export async function runFullSync(): Promise<number> {
   await startSync();
   try {
-    const { synced, sprintIssueCounts } = await syncAll();
+    const { synced, sprintIssueCounts, previousSprintIssueCounts } = await syncAll();
     await flushSyncedSprintIds();
-    await detectAndRemoveDeletedIssues(zohoThrottle.failed, sprintIssueCounts);
+    await detectAndRemoveDeletedIssues(zohoThrottle.failed, sprintIssueCounts, previousSprintIssueCounts);
     await touchLastSyncedAt();
     await completeSync(zohoThrottle.sent, zohoThrottle.failed);
     await checkWatchedIssueStatusChanges();
