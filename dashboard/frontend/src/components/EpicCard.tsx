@@ -121,7 +121,7 @@ function EpicStatusRow({ status, count, total, color, onClick }: {
     >
       <span style={{ ...s.dot, backgroundColor: color }} />
       <span style={s.statusLabel}>{status}</span>
-      <span style={{ ...s.statusCount, color: count === 0 ? C.inkTertiary : C.inkMuted }}>{count}</span>
+      <span style={{ ...s.statusCount, color: count === 0 ? C.hairline : C.inkMuted }}>{count}</span>
       <span style={{ ...s.statusPct, color: count === 0 ? C.hairline : C.inkTertiary }}>
         {total > 0 ? `${Math.round((count / total) * 100)}%` : '—'}
       </span>
