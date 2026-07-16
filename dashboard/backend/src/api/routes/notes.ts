@@ -197,7 +197,7 @@ router.get('/search-users', async (req, res) => {
     }
 
     const users = await prisma.user.findMany({
-      where: { name: { contains: q } },
+      where: { name: { contains: q }, deletedAt: null },
       select: { zohoId: true, name: true },
       take: 20,
       orderBy: { name: 'asc' },

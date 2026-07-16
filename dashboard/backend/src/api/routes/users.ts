@@ -11,6 +11,8 @@ import prisma from '../../db/client';
 import { fetchZohoUsers } from '../../services/zohoUsers';
 import { queryUserIssues, queryUserSprintHistory, type ContextualIssue } from '../../services/issueQueries';
 
+const USER_DELETION_THRESHOLD = 2;
+
 // All route handlers below are mounted under the Express router and protected by the
 // application-level OAuth middleware (applied when this router is registered in the app).
 
@@ -32,12 +34,34 @@ type Role = (typeof VALID_ROLES)[number];
  */
 router.get('/', async (_req, res) => {
   try {
-    const users = await prisma.user.findMany({ orderBy: { name: 'asc' } });
+    const users = await prisma.user.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } });
     res.json({ users, total: users.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('Users list failed:', msg);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' });
+  }
+});
+
+router.get('/deleted', async (_req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      where: { deletedAt: { not: null } },
+      orderBy: { deletedAt: 'desc' },
+      select: {
+        zohoId: true,
+        name: true,
+        email: true,
+        role: true,
+        deletedAt: true,
+        missingSyncCount: true,
+      },
+    });
+    res.json({ users });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('Deleted users fetch failed:', msg);
+    res.status(500).json({ error: msg });
   }
 });
 
@@ -71,7 +95,7 @@ router.get('/:id/profile', async (req, res) => {
     const watchedStates = req.query.watchedStates
       ? String(req.query.watchedStates).split(',').map(s => s.trim()).filter(Boolean)
       : [];
-    const user = await prisma.user.findUnique({ where: { zohoId: req.params.id } });
+    const user = await prisma.user.findUnique({ where: { zohoId: req.params.id, deletedAt: null } });
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
     const activeSprints = await prisma.sprint.findMany({ where: { status: 'active' } });
@@ -190,7 +214,7 @@ router.get('/:id/profile', async (req, res) => {
  */
 router.get('/:id/sprint-history', async (req, res) => {
   try {
-    const user = await prisma.user.findUnique({ where: { zohoId: req.params.id } });
+    const user = await prisma.user.findUnique({ where: { zohoId: req.params.id, deletedAt: null } });
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
     // Single DB query — no Zoho calls
@@ -219,6 +243,7 @@ router.get('/:id/sprint-history', async (req, res) => {
  */
 router.post('/sync', async (_req, res) => {
   try {
+    const syncStartTime = new Date();
     const zohoUsers = await fetchZohoUsers();
 
     if (zohoUsers.length === 0) {
@@ -232,16 +257,16 @@ router.post('/sync', async (_req, res) => {
       zohoUsers.map((u) =>
         prisma.user.upsert({
           where: { zohoId: u.zohoId },
-          update: { name: u.name, email: u.email },
-          create: { zohoId: u.zohoId, name: u.name, email: u.email, role: 'OTHER' },
+          update: { name: u.name, email: u.email, syncedAt: new Date(), missingSyncCount: 0, deletedAt: null },
+          create: { zohoId: u.zohoId, name: u.name, email: u.email, role: 'OTHER', syncedAt: new Date(), missingSyncCount: 0, deletedAt: null },
         })
       )
     );
 
+    await detectAndRemoveDeletedUsers(syncStartTime);
+
     res.json({ synced: upserted.length, users: upserted });
   } catch (err) {
-    // Distinguish between an Axios error (network / Zoho API failure) and a generic error.
-    // When the error is Axios-based, include the remote status code and response body for debugging.
     const zohoBody = axios.isAxiosError(err) ? err.response?.data : undefined;
     const message  = axios.isAxiosError(err)
       ? `Zoho API ${err.response?.status ?? 'error'} at ${err.config?.url}: ${JSON.stringify(zohoBody ?? err.message)}`
@@ -250,6 +275,67 @@ router.post('/sync', async (_req, res) => {
     res.status(500).json({ error: message });
   }
 });
+
+async function detectAndRemoveDeletedUsers(syncStartTime: Date): Promise<void> {
+  const missedUsers = await prisma.user.findMany({
+    where: {
+      syncedAt: { lt: syncStartTime },
+      deletedAt: null,
+    },
+    select: { zohoId: true, name: true, email: true, missingSyncCount: true },
+  });
+
+  if (missedUsers.length === 0) return;
+
+  const userIdsToIncrement = missedUsers.map(u => u.zohoId);
+  await prisma.user.updateMany({
+    where: { zohoId: { in: userIdsToIncrement } },
+    data: { missingSyncCount: { increment: 1 } },
+  });
+
+  const usersToDelete = await prisma.user.findMany({
+    where: {
+      zohoId: { in: userIdsToIncrement },
+      missingSyncCount: { gte: USER_DELETION_THRESHOLD },
+      deletedAt: null,
+    },
+    select: { zohoId: true, name: true, email: true },
+  });
+
+  if (usersToDelete.length === 0) {
+    console.log(`[User Deletion Detection] ${missedUsers.length} users missed, none reached threshold`);
+    return;
+  }
+
+  const deletedAt = new Date();
+  const deletedIds = usersToDelete.map(u => u.zohoId);
+
+  await prisma.user.updateMany({
+    where: { zohoId: { in: deletedIds } },
+    data: { deletedAt },
+  });
+
+  console.log(`[User Deletion Detection] Soft-deleted ${usersToDelete.length} users after ${USER_DELETION_THRESHOLD} consecutive misses:`);
+  usersToDelete.forEach(u => console.log(`  - ${u.name} (${u.zohoId})`));
+
+  const notifications = usersToDelete.map(user => ({
+    id: `deleted_user_${user.zohoId}_${deletedAt.getTime()}`,
+    userId: 'system',
+    type: 'user_deleted',
+    issueId: null,
+    boardId: null,
+    noteId: null,
+    oldStatus: '',
+    newStatus: '',
+    message: `User "${user.name}" (${user.email ?? 'no email'}) was soft-deleted after going missing from Zoho for ${USER_DELETION_THRESHOLD} consecutive syncs (zohoId: ${user.zohoId}).`,
+    read: false,
+    createdAt: deletedAt,
+  }));
+
+  if (notifications.length > 0) {
+    await prisma.activityNotification.createMany({ data: notifications });
+  }
+}
 
 /**
  * PATCH /api/users/:id/role — Update the local role label for a user.
