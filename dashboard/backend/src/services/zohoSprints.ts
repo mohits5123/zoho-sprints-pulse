@@ -1538,6 +1538,18 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
         // Create/update Sprint record so queryKanbanBoardIssues can identify this board
         // The statusCode=7 marker is used by queryKanbanBoardIssues to filter kanban issues
         const totalTickets = Object.values(boardStatusCounts).reduce((a, b) => a + b, 0);
+
+        // Capture the prior stored count before the upsert overwrites it, so the
+        // drop-fraction sanity guard in detectAndRemoveDeletedIssues can fire for
+        // kanban boards too (mirrors the scrum-sprint capture above).
+        const existingBoard = await prisma.sprint.findUnique({
+          where: { zohoId: kanbanBoardId },
+          select: { totalTickets: true },
+        });
+        if (existingBoard) {
+          previousSprintIssueCounts.set(kanbanBoardId, existingBoard.totalTickets);
+        }
+
         await prisma.sprint.upsert({
           where:  { zohoId: kanbanBoardId },
           update: {
