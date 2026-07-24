@@ -12,7 +12,7 @@
  * @see {@link BoardPage} - Kanban/Scrum board view for a project
  * @see {@link IssueListPage} - Detailed issue list for a project
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Home } from './pages/Home';
 import { Users } from './pages/Users';
@@ -29,7 +29,7 @@ import { WatchlistPage } from './pages/WatchlistPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { LastSyncedFooter } from './components/LastSyncedFooter';
 import { SyncProgressBar } from './components/SyncProgressBar';
-import { SyncProgressProvider } from './contexts/SyncProgressContext';
+import { SyncProgressProvider, useSyncProgress } from './contexts/SyncProgressContext';
 import { fetchSyncStatus } from './api/client';
 
 /**
@@ -59,10 +59,21 @@ import { fetchSyncStatus } from './api/client';
  */
 function AppContent() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const { syncActive } = useSyncProgress();
 
   useEffect(() => {
     fetchSyncStatus().then(({ lastSyncedAt: ts }) => setLastSyncedAt(ts)).catch(() => {});
   }, []);
+
+  // Re-fetch the footer timestamp when a background sync completes so the
+  // "Last synced" message reflects the manual sync without a page reload.
+  const wasSyncActive = useRef(false);
+  useEffect(() => {
+    if (wasSyncActive.current && !syncActive) {
+      fetchSyncStatus().then(({ lastSyncedAt: ts }) => setLastSyncedAt(ts)).catch(() => {});
+    }
+    wasSyncActive.current = syncActive;
+  }, [syncActive]);
 
   return (
     <>
