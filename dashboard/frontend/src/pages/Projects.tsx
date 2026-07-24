@@ -2,13 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GripVertical, MoreHorizontal, ChevronDown, ChevronRight, Eye } from 'lucide-react';
 import {
-  fetchProjects, syncProjects, updateProjectBoardType,
+  fetchProjects, updateProjectBoardType,
   updateProjectDisplay, reorderProjects, Project,
 } from '../api/client';
-import { SyncButton } from '../components/SyncButton';
 import { BackButton } from '../components/BackButton';
 import { StatusGroupCounts } from '../components/StatusGroupCounts';
-import { useSyncProgress } from '../contexts/SyncProgressContext';
 import { C, R, font } from '../theme';
 
 const BOARD_TYPES = ['scrum', 'kanban', 'other'] as const;
@@ -261,7 +259,6 @@ function ProjectCard({
 
 export function Projects() {
   const navigate = useNavigate();
-  const { setSyncActive } = useSyncProgress();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
@@ -275,18 +272,6 @@ export function Projects() {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
-
-  async function handleResync() {
-    setError(null);
-    setSyncActive(true);
-    try {
-      const result = await syncProjects();
-      setProjects([...result.projects].sort((a, b) => a.displayOrder - b.displayOrder));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sync failed');
-      setSyncActive(false);
-    }
-  }
 
   async function handleHide(id: string) {
     setProjects((prev) => prev.map((p) => p.zohoId === id ? { ...p, hidden: true } : p));
@@ -350,7 +335,6 @@ export function Projects() {
             <p style={s.subtitle}>{projects.length} projects synced from Zoho Sprints</p>
           </div>
         </div>
-        <SyncButton onClick={handleResync} />
       </header>
 
       {error && <p style={s.errorText}>{error}</p>}

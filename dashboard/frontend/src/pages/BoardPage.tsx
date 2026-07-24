@@ -203,11 +203,11 @@ export function BoardPage() {
       return;
     }
     setEpicsLoading(true);
-    fetchSprintEpics(projectId, selectedSprint.zohoId, staleDays, watchedStates)
+    fetchSprintEpics(projectId, selectedSprint.zohoId, staleDays)
       .then(({ epics: e, statusGroups: sg }) => { setEpics(e); setSprintStatusGroups(sg); })
       .catch((err) => console.error('Epic fetch failed:', err.message))
       .finally(() => setEpicsLoading(false));
-  }, [selectedSprint?.zohoId, projectId, project?.boardType, staleDays, watchedStates.join(',')]);
+  }, [selectedSprint?.zohoId, projectId, project?.boardType, staleDays]);
 
   // ── Navigation helpers ──────────────────────────────────────────────────
 

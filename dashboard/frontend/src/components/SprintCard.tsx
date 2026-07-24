@@ -186,7 +186,7 @@ function StatusRow({ status, count, total, color, onClick }: {
     >
       <span style={{ ...s.dot, backgroundColor: color }} />
       <span style={s.statusLabel}>{status}</span>
-      <span style={{ ...s.statusCount, color: count === 0 ? C.inkTertiary : C.inkMuted }}>{count}</span>
+      <span style={{ ...s.statusCount, color: count === 0 ? C.hairline : C.inkMuted }}>{count}</span>
       <span style={{ ...s.statusPct, color: count === 0 ? C.hairline : C.inkTertiary }}>
         {total > 0 ? `${Math.round((count / total) * 100)}%` : '—'}
       </span>
@@ -241,7 +241,7 @@ const s: Record<string, React.CSSProperties> = {
   dates: { margin: 0, fontSize: 12, color: C.inkTertiary, fontFamily: font.text },
   users: { display: 'flex', flexWrap: 'wrap' as const, gap: 4 },
   totalLine: { margin: 0 },
-  totalCount: { fontSize: 28, fontWeight: 600, color: C.inkMuted, lineHeight: 1, fontFamily: font.display, letterSpacing: '-0.6px' },
+  totalCount: { fontSize: 24, fontWeight: 600, color: C.inkMuted, lineHeight: 1, fontFamily: font.display, letterSpacing: '-0.6px' },
   totalLabel: { fontSize: 14, color: C.inkSubtle, fontFamily: font.text },
   breakdown: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 4 },
   breakdownRow: { display: 'flex', alignItems: 'center', gap: 7 },

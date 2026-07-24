@@ -12,12 +12,14 @@ export function DonutChart({
   strokeWidth = 12,
   centerLabel,
   centerSub,
+  centerLabelSize,
 }: {
   segments: DonutSegment[];
   size?: number;
   strokeWidth?: number;
   centerLabel?: string;
   centerSub?: string;
+  centerLabelSize?: number;
 }) {
   const cx = size / 2;
   const cy = size / 2;
@@ -33,7 +35,7 @@ export function DonutChart({
     return { ...seg, len, dashArray: `${len} ${circ - len}`, dashOffset };
   });
 
-  const labelSize = size * 0.16;
+  const labelSize = centerLabelSize ?? size * 0.16;
   const subSize = size * 0.09;
 
   return (

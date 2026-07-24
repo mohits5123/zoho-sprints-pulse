@@ -5,15 +5,11 @@ const KEY = 'last_synced_at';
 const SYNC_IN_PROGRESS_KEY = 'sync_in_progress';
 const SYNC_TOTAL_REQUESTS_KEY = 'sync_total_requests';
 const SYNC_START_TIME_KEY = 'sync_start_time';
-const SYNCED_SPRINT_IDS_KEY = 'synced_sprint_ids';
 const SYNC_COMPLETED_SUCCESSFULLY_KEY = 'sync_completed_successfully';
 const SYNC_FAILED_REQUESTS_KEY = 'sync_failed_requests';
 
-const pendingSyncedSprintIds = new Set<string>();
-
 export interface SyncMetadata {
   syncStartTime: string | null;
-  syncedSprintIds: string[];
   completedSuccessfully: boolean;
   failedRequests: number;
 }
@@ -45,11 +41,6 @@ export async function startSync(): Promise<void> {
     create: { key: SYNC_START_TIME_KEY, value: new Date().toISOString() },
   });
   await prisma.settings.upsert({
-    where:  { key: SYNCED_SPRINT_IDS_KEY },
-    update: { value: '[]' },
-    create: { key: SYNCED_SPRINT_IDS_KEY, value: '[]' },
-  });
-  await prisma.settings.upsert({
     where:  { key: SYNC_COMPLETED_SUCCESSFULLY_KEY },
     update: { value: 'false' },
     create: { key: SYNC_COMPLETED_SUCCESSFULLY_KEY, value: 'false' },
@@ -58,21 +49,6 @@ export async function startSync(): Promise<void> {
     where:  { key: SYNC_FAILED_REQUESTS_KEY },
     update: { value: '0' },
     create: { key: SYNC_FAILED_REQUESTS_KEY, value: '0' },
-  });
-}
-
-export function recordSyncedSprint(sprintId: string): void {
-  pendingSyncedSprintIds.add(sprintId);
-}
-
-export async function flushSyncedSprintIds(): Promise<void> {
-  if (pendingSyncedSprintIds.size === 0) return;
-  const ids = Array.from(pendingSyncedSprintIds);
-  pendingSyncedSprintIds.clear();
-  await prisma.settings.upsert({
-    where:  { key: SYNCED_SPRINT_IDS_KEY },
-    update: { value: JSON.stringify(ids) },
-    create: { key: SYNCED_SPRINT_IDS_KEY, value: JSON.stringify(ids) },
   });
 }
 
@@ -101,15 +77,13 @@ export async function completeSync(totalRequests: number, failedRequests: number
 }
 
 export async function getSyncMetadata(): Promise<SyncMetadata> {
-  const [startTimeRow, sprintIdsRow, completedRow, failedRow] = await Promise.all([
+  const [startTimeRow, completedRow, failedRow] = await Promise.all([
     prisma.settings.findUnique({ where: { key: SYNC_START_TIME_KEY } }),
-    prisma.settings.findUnique({ where: { key: SYNCED_SPRINT_IDS_KEY } }),
     prisma.settings.findUnique({ where: { key: SYNC_COMPLETED_SUCCESSFULLY_KEY } }),
     prisma.settings.findUnique({ where: { key: SYNC_FAILED_REQUESTS_KEY } }),
   ]);
   return {
     syncStartTime: startTimeRow?.value ?? null,
-    syncedSprintIds: sprintIdsRow ? JSON.parse(sprintIdsRow.value) : [],
     completedSuccessfully: completedRow?.value === 'true',
     failedRequests: failedRow ? parseInt(failedRow.value, 10) : 0,
   };

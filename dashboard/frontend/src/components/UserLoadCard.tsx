@@ -70,7 +70,7 @@ function Bar({ user, rank, maxActive, onClick, isKanban }: {
               segments={[
                 ...(user.todo > 0 ? [{ value: user.todo, color: GROUP_COLORS.todo, label: `${user.todo} todo` }] : []),
                 ...(user.doing > 0 ? [{ value: user.doing, color: GROUP_COLORS.doing, label: `${user.doing} in progress` }] : []),
-                ...(!isKanban && user.done > 0 ? [{ value: user.done, color: GROUP_COLORS.done + '66', label: `${user.done} done` }] : []),
+                ...(!isKanban && user.done > 0 ? [{ value: user.done, color: GROUP_COLORS.done, label: `${user.done} done` }] : []),
               ]}
               height={6}
               borderRadius={R.xs}
@@ -142,7 +142,7 @@ export function UserLoadCard({ projectId, sprintId, staleDays = 7, onUserClick, 
         {usersWithIssues.length > 0
           ? (['todo', 'doing', 'done'] as const).map((g) => (
               <span key={g} style={s.legendItem}>
-                <span style={{ ...s.dot, backgroundColor: GROUP_COLORS[g] + (g === 'done' ? '66' : '') }} />
+                <span style={{ ...s.dot, backgroundColor: GROUP_COLORS[g] }} />
                 {GROUP_LABELS[g]}
               </span>
             ))

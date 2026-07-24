@@ -100,6 +100,7 @@ export function UserCard({ user, wip = 0, staleCount = 0, onRoleChange, onClick 
         <select
           value={role}
           disabled={updating}
+          onClick={(e) => e.stopPropagation()}
           onChange={(e) => handleRoleChange(e.target.value as UserRole)}
           style={{
             ...s.select,
@@ -174,7 +175,7 @@ const s: Record<string, React.CSSProperties> = {
     flex: 1,
   },
   name: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: 400,
     color: C.inkMuted,
     whiteSpace: 'nowrap' as const,

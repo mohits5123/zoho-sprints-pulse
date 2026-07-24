@@ -18,14 +18,12 @@
  *
  * @module SprintHealth
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronRight, Eye, X } from 'lucide-react';
-import { fetchSprints, syncSprints, fetchSyncStatus, fetchPastSprintNames, fetchPastSprintData, fetchProjects, SprintSnapshot, Project, PastSprintName, updateSprintDisplay } from '../api/client';
+import { fetchSprints, fetchPastSprintNames, fetchPastSprintData, fetchProjects, SprintSnapshot, Project, PastSprintName, updateSprintDisplay } from '../api/client';
 import { SprintCard } from '../components/SprintCard';
-import { SyncButton } from '../components/SyncButton';
 import { BackButton } from '../components/BackButton';
-import { useSyncProgress } from '../contexts/SyncProgressContext';
 import { C, font, R, S } from '../theme';
 
 /**
@@ -50,14 +48,12 @@ import { C, font, R, S } from '../theme';
  */
 export function SprintHealth() {
   const navigate = useNavigate();
-  const { syncActive, setSyncActive } = useSyncProgress();
   function onSprintClick(projectId: string, sprintZohoId: string) {
     navigate(`/board/${projectId}?sprintId=${sprintZohoId}`);
   }
   const [sprints, setSprints]   = useState<SprintSnapshot[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showPastModal, setShowPastModal] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>('');
@@ -88,7 +84,6 @@ export function SprintHealth() {
       .then((d) => setSprints(d.sprints))
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
   /**
@@ -213,42 +208,6 @@ export function SprintHealth() {
     }
   }
 
-  /**
-   * Initiates a full sync of sprint data from Zoho.
-   *
-   * Sync flow:
-   * 1. Calls `syncSprints()` which returns immediately (fire-and-forget)
-   * 2. Starts polling `fetchSyncStatus()` every 5 seconds
-   * 3. Compares the returned `lastSyncedAt` against the value captured before sync;
-   *    when it changes, the sync is considered complete
-   * 4. Re-fetches the full sprint list and updates UI state
-   *
-   * The polling interval is stored in `pollRef` so it can be cleared on unmount.
-   *
-   * @param err.message - Error detail on failure, or a generic message if the error
-   *                      is not an `Error` instance
-   */
-  async function handleSync() {
-    setError(null);
-    setSyncActive(true);
-    try {
-      await syncSprints();
-      pollRef.current = setInterval(async () => {
-        try {
-          await fetchSyncStatus();
-          const updated = await fetchSprints();
-          setSprints(updated.sprints);
-          clearInterval(pollRef.current!);
-          pollRef.current = null;
-          setSyncActive(false);
-        } catch { /* keep polling */ }
-      }, 5_000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sync failed');
-      setSyncActive(false);
-    }
-  }
-
   // Categorize sprints for rendering: visible vs. hidden, active vs. past.
   const visibleSprints = sprints.filter(sp => !sp.hidden);
   const hiddenSprints = sprints.filter(sp => sp.hidden);
@@ -272,21 +231,19 @@ export function SprintHealth() {
           </div>
         </div>
         <div style={s.headerActions}>
-          <button style={s.pastBtn} onClick={handleLoadPast} disabled={loading || syncActive}>
+          <button style={s.pastBtn} onClick={handleLoadPast} disabled={loading}>
             Load Past Sprints
           </button>
-          <SyncButton onClick={handleSync} />
         </div>
       </header>
 
       {error && <p style={s.errorText}>{error}</p>}
       {loading && <p style={s.muted}>Loading sprint data…</p>}
 
-      {!loading && sprints.length === 0 && !syncActive && (
+      {!loading && sprints.length === 0 && (
         <div style={s.empty}>
           <p style={s.emptyTitle}>No sprint data yet</p>
-          <p style={s.muted}>Make sure your Zoho credentials are set in ~/.zshrc, then click <strong>Sync</strong>.</p>
-          <SyncButton onClick={handleSync} label="Sync" style={{ marginTop: S.xs, padding: `${S.sm}px ${S.xxl}px`, fontSize: 15, fontWeight: 600 }} />
+          <p style={s.muted}>Make sure your Zoho credentials are set in ~/.zshrc, then sync from the dashboard.</p>
         </div>
       )}
 

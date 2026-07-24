@@ -73,12 +73,12 @@ function CompletionRow({ user, rank, onClick }: {
           />
         </div>
 
-      <span style={{ fontSize: 12, color: C.inkTertiary, textAlign: 'right' as const, fontVariantNumeric: 'tabular-nums', fontFamily: font.text }}>
+      <span style={{ fontSize: 14, color: C.inkMuted, textAlign: 'right' as const, fontVariantNumeric: 'tabular-nums', fontFamily: font.text }}>
         {user.done} / {total}
       </span>
 
       <span style={{
-        fontSize: 14, fontWeight: 500, textAlign: 'right' as const,
+        fontSize: 12, fontWeight: 500, textAlign: 'right' as const,
         color: barColor, fontVariantNumeric: 'tabular-nums',
         fontFamily: font.text,
       }}>
@@ -134,7 +134,7 @@ export function UserCompletionCard({ projectId, sprintId, staleDays = 7, onUserC
         </div>
         {!loading && sorted.length > 0 && (
           <span style={{
-            fontSize: 28, fontWeight: 600,
+            fontSize: 24, fontWeight: 600,
             color: avgPct >= 60 ? C.success : avgPct >= 30 ? '#f59e0b' : '#ef4444',
             fontVariantNumeric: 'tabular-nums',
             fontFamily: font.display,
