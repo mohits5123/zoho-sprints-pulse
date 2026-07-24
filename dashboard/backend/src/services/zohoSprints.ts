@@ -56,7 +56,7 @@ import { config } from '../config';
 import prisma from '../db/client';
 import { recordBurndownSnapshot } from './burndownSnapshots';
 import { zohoThrottle } from './rateLimiter';
-import { startSync, completeSync, touchLastSyncedAt, recordSyncedSprint, flushSyncedSprintIds, getSyncMetadata } from './syncStatus';
+import { startSync, completeSync, touchLastSyncedAt, getSyncMetadata } from './syncStatus';
 import { checkWatchedIssueStatusChanges, checkNoteDeadlineNotifications } from './activitySync';
 
 
@@ -1275,7 +1275,7 @@ export function clearZohoCache(): void {
  * 
  * @returns The total number of sprints successfully synced across all projects
  */
-export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Map<string, number>; previousSprintIssueCounts: Map<string, number> }> {
+export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Map<string, number>; previousSprintIssueCounts: Map<string, number>; syncedSprintIds: string[] }> {
   clearZohoCache();      // Ensure fresh status maps on this sync run
   zohoThrottle.resetStats();  // Reset rate limiter tracking
   
@@ -1294,6 +1294,9 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
   let synced = 0;
   const sprintIssueCounts = new Map<string, number>();
   const previousSprintIssueCounts = new Map<string, number>();
+  // Sprint/board IDs synced during this run, collected locally and returned to
+  // the caller. Used by deletion detection to scope which sprints to check.
+  const syncedSprintIds: string[] = [];
 
   // ── Scrum projects ──────────────────────────────────────────────────────────
   
@@ -1417,7 +1420,7 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
         // Phase 3c: Sync issues for this sprint
         const sprintSynced = await syncIssues(teamId, project.zohoId, sprint.zohoId, sprint.status);
         sprintIssueCounts.set(sprint.zohoId, sprintSynced);
-        recordSyncedSprint(sprint.zohoId);
+        syncedSprintIds.push(sprint.zohoId);
 
         // Record daily burndown snapshot (upserts — safe to call on every sync)
         const doneCount = Object.entries(statusBreakdown)
@@ -1530,7 +1533,7 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
         // Sync issues for the kanban board (treated as "active" sprint)
         const kanbanSynced = await syncIssues(teamId, project.zohoId, kanbanBoardId, 'active');
         sprintIssueCounts.set(kanbanBoardId, kanbanSynced);
-        recordSyncedSprint(kanbanBoardId);
+        syncedSprintIds.push(kanbanBoardId);
 
         // Create/update Sprint record so queryKanbanBoardIssues can identify this board
         // The statusCode=7 marker is used by queryKanbanBoardIssues to filter kanban issues
@@ -1611,7 +1614,7 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
 
   zohoThrottle.printSummary();
   
-  return { synced, sprintIssueCounts, previousSprintIssueCounts };
+  return { synced, sprintIssueCounts, previousSprintIssueCounts, syncedSprintIds };
 }
 
 // Keep old export for backwards compatibility
@@ -1624,6 +1627,7 @@ async function detectAndRemoveDeletedIssues(
   failedRequests: number,
   sprintIssueCounts: Map<string, number>,
   previousSprintIssueCounts: Map<string, number>,
+  syncedSprintIds: string[],
 ): Promise<void> {
   const metadata = await getSyncMetadata();
 
@@ -1643,7 +1647,6 @@ async function detectAndRemoveDeletedIssues(
   }
 
   const syncStartTime = new Date(metadata.syncStartTime);
-  const syncedSprintIds = metadata.syncedSprintIds;
 
   if (syncedSprintIds.length === 0) {
     console.log('[Deletion Detection] Skipping: no sprints were synced');
@@ -1794,23 +1797,38 @@ async function createDeletionNotifications(
  * `syncAll` directly since it doesn't need UI progress updates.
  * 
  * **Lifecycle**:
- * 1. `startSync()` — marks sync as in-progress, resets progress bar state
- * 2. `syncAll()` — performs the actual data synchronization
- * 3. `detectAndRemoveDeletedIssues()` — soft-deletes issues missing from Zoho
- * 4. `touchLastSyncedAt()` — updates the timestamp of the last successful sync
- * 5. `completeSync(sent, failed)` — marks sync as complete with request counts
- * 6. `checkWatchedIssueStatusChanges()` — creates notifications for watched issue changes
- * 7. `checkNoteDeadlineNotifications()` — creates notifications for note deadlines
- * 
- * @returns The total number of sprints successfully synced (same as `syncAll()`)
+ * 1. Re-entrancy guard — skips if another sync is already running in this process
+ * 2. `startSync()` — marks sync as in-progress, resets progress bar state
+ * 3. `syncAll()` — performs the actual data synchronization
+ * 4. `detectAndRemoveDeletedIssues()` — soft-deletes issues missing from Zoho
+ * 5. `touchLastSyncedAt()` — updates the timestamp of the last successful sync
+ * 6. `completeSync(sent, failed)` — marks sync as complete with request counts
+ * 7. `checkWatchedIssueStatusChanges()` — creates notifications for watched issue changes
+ * 8. `checkNoteDeadlineNotifications()` — creates notifications for note deadlines
+ *
+ * @returns The total number of sprints successfully synced (same as `syncAll()`),
+ *          or 0 if another sync was already in progress
  * @see syncAll - The underlying sync logic without lifecycle tracking
  */
+
+/**
+ * Process-local re-entrancy guard. Manual syncs (POST /api/sprints/sync,
+ * POST /api/projects/sync) are fire-and-forget and can overlap the hourly
+ * cron. The check-and-set below is synchronous (before any `await`), so two
+ * concurrent `runFullSync()` calls cannot interleave within this process.
+ */
+let syncInProgress = false;
+
 export async function runFullSync(): Promise<number> {
-  await startSync();
+  if (syncInProgress) {
+    console.log('[Sync] Skipping: another sync is already in progress');
+    return 0;
+  }
+  syncInProgress = true;
   try {
-    const { synced, sprintIssueCounts, previousSprintIssueCounts } = await syncAll();
-    await flushSyncedSprintIds();
-    await detectAndRemoveDeletedIssues(zohoThrottle.failed, sprintIssueCounts, previousSprintIssueCounts);
+    await startSync();
+    const { synced, sprintIssueCounts, previousSprintIssueCounts, syncedSprintIds } = await syncAll();
+    await detectAndRemoveDeletedIssues(zohoThrottle.failed, sprintIssueCounts, previousSprintIssueCounts, syncedSprintIds);
     await touchLastSyncedAt();
     await completeSync(zohoThrottle.sent, zohoThrottle.failed);
     await checkWatchedIssueStatusChanges();
@@ -1819,5 +1837,7 @@ export async function runFullSync(): Promise<number> {
   } catch (error) {
     await completeSync(zohoThrottle.sent, zohoThrottle.failed);
     throw error;
+  } finally {
+    syncInProgress = false;
   }
 }
