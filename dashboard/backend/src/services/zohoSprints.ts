@@ -1332,7 +1332,7 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
         });
         // Sync backlog issues to the Issue table using backlogId as sprintZohoId
         const backlogSynced = await syncIssues(teamId, project.zohoId, backlogResult.backlogId, 'active');
-        trackedSyncCount(sprintIssueCounts, backlogResult.backlogId, backlogSynced);
+        sprintIssueCounts.set(backlogResult.backlogId, backlogSynced);
       }
 
       const sprints = await fetchSprintsForProject(teamId, project.zohoId);
@@ -1416,7 +1416,7 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
 
         // Phase 3c: Sync issues for this sprint
         const sprintSynced = await syncIssues(teamId, project.zohoId, sprint.zohoId, sprint.status);
-        trackedSyncCount(sprintIssueCounts, sprint.zohoId, sprintSynced);
+        sprintIssueCounts.set(sprint.zohoId, sprintSynced);
         recordSyncedSprint(sprint.zohoId);
 
         // Record daily burndown snapshot (upserts — safe to call on every sync)
@@ -1454,7 +1454,7 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
             },
           });
           const completedSynced = await syncIssues(teamId, project.zohoId, completed.zohoId, 'completed');
-          trackedSyncCount(sprintIssueCounts, completed.zohoId, completedSynced);
+          sprintIssueCounts.set(completed.zohoId, completedSynced);
           const doneCount = Object.entries(statusBreakdown)
             .filter(([name]) => statusGroups[name] === 'done')
             .reduce((sum, [, n]) => sum + n, 0);
@@ -1508,7 +1508,7 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
       // Sync backlog issues to the Issue table using backlogId as sprintZohoId
       if (backlogResult !== null) {
         const kanbanBacklogSynced = await syncIssues(teamId, project.zohoId, backlogResult.backlogId, 'active');
-        trackedSyncCount(sprintIssueCounts, backlogResult.backlogId, kanbanBacklogSynced);
+        sprintIssueCounts.set(backlogResult.backlogId, kanbanBacklogSynced);
       }
 
       // Find kanban board sprint (type=[7] - special Zoho sprint type for boards)
@@ -1529,7 +1529,7 @@ export async function syncAll(): Promise<{ synced: number; sprintIssueCounts: Ma
         
         // Sync issues for the kanban board (treated as "active" sprint)
         const kanbanSynced = await syncIssues(teamId, project.zohoId, kanbanBoardId, 'active');
-        trackedSyncCount(sprintIssueCounts, kanbanBoardId, kanbanSynced);
+        sprintIssueCounts.set(kanbanBoardId, kanbanSynced);
         recordSyncedSprint(kanbanBoardId);
 
         // Create/update Sprint record so queryKanbanBoardIssues can identify this board
@@ -1619,14 +1619,6 @@ export const syncSprintHealth = syncAll;
 
 const DELETION_THRESHOLD = 2;
 const DROP_FRACTION_THRESHOLD = 0.5;
-
-function trackedSyncCount(
-  counts: Map<string, number>,
-  sprintId: string,
-  count: number,
-): void {
-  counts.set(sprintId, count);
-}
 
 async function detectAndRemoveDeletedIssues(
   failedRequests: number,
