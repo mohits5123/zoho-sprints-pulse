@@ -1,5 +1,5 @@
 -- CreateTable: Watchlist
-CREATE TABLE "Watchlist" (
+CREATE TABLE IF NOT EXISTS "Watchlist" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "boardId" TEXT NOT NULL,
     "issueId" TEXT NOT NULL,
@@ -10,10 +10,10 @@ CREATE TABLE "Watchlist" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Watchlist_boardId_issueId_userId_key" ON "Watchlist"("boardId", "issueId", "userId");
+CREATE UNIQUE INDEX IF NOT EXISTS "Watchlist_boardId_issueId_userId_key" ON "Watchlist"("boardId", "issueId", "userId");
 
 -- CreateTable: Note
-CREATE TABLE "Note" (
+CREATE TABLE IF NOT EXISTS "Note" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "userId" TEXT NOT NULL,
     "title" TEXT NOT NULL DEFAULT 'Untitled',
@@ -30,7 +30,7 @@ CREATE TABLE "Note" (
 );
 
 -- CreateTable: DeadlineGroup
-CREATE TABLE "DeadlineGroup" (
+CREATE TABLE IF NOT EXISTS "DeadlineGroup" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "title" TEXT NOT NULL,
     "dueDate" DATETIME NOT NULL,
@@ -40,7 +40,7 @@ CREATE TABLE "DeadlineGroup" (
 );
 
 -- CreateTable: Deadline
-CREATE TABLE "Deadline" (
+CREATE TABLE IF NOT EXISTS "Deadline" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "boardId" TEXT,
     "issueId" TEXT,
@@ -55,7 +55,7 @@ CREATE TABLE "Deadline" (
 );
 
 -- CreateTable: ActivityNotification
-CREATE TABLE "ActivityNotification" (
+CREATE TABLE IF NOT EXISTS "ActivityNotification" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "userId" TEXT NOT NULL,
     "type" TEXT NOT NULL DEFAULT 'status_change',
@@ -69,5 +69,5 @@ CREATE TABLE "ActivityNotification" (
 );
 
 -- CreateIndex
-CREATE INDEX "ActivityNotification_userId_read_idx" ON "ActivityNotification"("userId", "read");
-CREATE INDEX "ActivityNotification_userId_createdAt_idx" ON "ActivityNotification"("userId", "createdAt");
+CREATE INDEX IF NOT EXISTS "ActivityNotification_userId_read_idx" ON "ActivityNotification"("userId", "read");
+CREATE INDEX IF NOT EXISTS "ActivityNotification_userId_createdAt_idx" ON "ActivityNotification"("userId", "createdAt");
