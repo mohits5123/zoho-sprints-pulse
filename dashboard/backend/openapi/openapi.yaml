@@ -1,0 +1,2294 @@
+openapi: 3.1.0
+
+info:
+  title: Zonaliser API
+  version: 0.1.0
+  summary: Local-first engineering analytics dashboard API for Zoho Sprints.
+  description: |
+    # Zonaliser API Contract
+
+    The Zonaliser backend exposes a local-first REST API that surfaces
+    sprint health, ticket staleness, developer load, and bottleneck
+    analytics for engineering managers. **All endpoints serve from the
+    local SQLite database** — Zoho Sprints is only contacted during
+    scheduled syncs (cron `0 * * * *` or manual `POST /api/sprints/sync`).
+
+    ## Local-only deployment
+
+    The API is intentionally designed for a developer's local Mac/Linux
+    machine. There is **no request authentication**; the server is meant
+    to run on `http://localhost:3001` alongside the Vite dev frontend on
+    `http://localhost:5173`. CORS is locked to the dev frontend origin.
+
+    ## Fire-and-forget sync endpoints
+
+    `POST /api/sprints/sync`, `POST /api/projects/sync`, and
+    `POST /api/users/sync` return immediately with a placeholder body.
+    The actual sync runs in the background and its progress is observable
+    via `GET /api/sync/progress`. Errors during the background run are
+    logged but never reach the caller.
+
+    ## Date and ID conventions
+
+    - All Zoho IDs (project, sprint, user, issue) are opaque strings.
+    - Internal UUIDs are used for locally-mutable records (notes, deadlines,
+      watchlist entries, notifications).
+    - Timestamps are ISO 8601 strings. Optional `DateTime?` Prisma fields
+      serialize as `null` when absent.
+
+    ## Risk thresholds
+
+    `staleDays` (default `7`) and `watchedStates` (CSV of status names,
+    empty = all states) are passed as query parameters and are never
+    hardcoded.
+  contact:
+    name: Zonaliser
+    url: https://github.com/anomalyco/zonaliser
+
+servers:
+  - url: http://localhost:3001
+    description: Local development backend
+  - url: /
+    description: Same-origin (when served behind the Vite proxy)
+
+tags:
+  - name: Health
+    description: Liveness, Zoho connectivity, and front-end configuration.
+  - name: Sync
+    description: Manual and scheduled sync controls; sync state.
+  - name: Users
+    description: Team roster, profiles, sprint history, role assignment.
+  - name: Team
+    description: Cross-project aggregate team metrics.
+  - name: Projects
+    description: Project metadata, board configuration, reorder, kanban and backlog queries.
+  - name: Sprints
+    description: Sprint list, manual sync, past-sprint loading, debug, display settings.
+  - name: Burndown
+    description: Daily burndown snapshots per sprint.
+  - name: Issues
+    description: Single-issue lookup and soft-deleted issue audit list.
+  - name: Notes
+    description: Markdown notes with issue links, mentions, optional deadlines.
+  - name: Deadlines
+    description: Local deadline reminders (standalone or issue-linked), batch groups.
+  - name: Watchlist
+    description: Per-user, per-board tracked tickets; importance toggle.
+  - name: Activity
+    description: Notifications and activity-summary counts.
+  - name: Docs
+    description: OpenAPI document and Swagger UI.
+
+# Reusable parameters and schemas live under `components` below.
+
+# Reusable schemas -----------------------------------------------------
+
+components:
+  # Mirrors of the top-level parameter declarations so tools that only
+  # read from `components.parameters` can still resolve $refs.
+  parameters:
+    StaleDays:
+      name: staleDays
+      in: query
+      description: Days since last update before an issue is flagged as stale.
+      schema:
+        type: integer
+        minimum: 1
+        default: 7
+    WatchedStates:
+      name: watchedStates
+      in: query
+      description: Comma-separated status names to include in stale detection. Empty = all states.
+      schema:
+        type: string
+        default: ""
+        examples: ["In Progress,Review"]
+    BoardIdQuery:
+      name: boardId
+      in: query
+      description: Project Zoho ID to scope results to a board.
+      schema:
+        type: string
+    UserIdQuery:
+      name: userId
+      in: query
+      description: User Zoho ID (or the literal "local") to scope results.
+      schema:
+        type: string
+
+  schemas:
+
+    # --- Generic envelopes ---------------------------------------------
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+      example:
+        error: Note not found
+
+    Deleted:
+      type: object
+      required: [deleted]
+      properties:
+        deleted:
+          type: boolean
+          const: true
+
+    # --- Prisma-backed models -----------------------------------------
+    User:
+      type: object
+      required: [zohoId, name, role, createdAt, updatedAt]
+      properties:
+        zohoId: { type: string, description: Zoho user ID (immutable). }
+        name: { type: string }
+        email: { type: [string, "null"] }
+        role:
+          type: string
+          enum: [DEV, QA, PROD, OTHER]
+          description: Locally assigned role (not from Zoho).
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    UserSearchHit:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, description: User Zoho ID. }
+        name: { type: string }
+
+    Project:
+      type: object
+      description: |
+        Project record. The backend may include additional diagnostic
+        fields (`rawData`, `statusMap`, `backlogZohoId`) that are not
+        required by the frontend.
+      required:
+        - zohoId
+        - name
+        - status
+        - boardType
+        - displayOrder
+        - hidden
+        - createdAt
+        - updatedAt
+      properties:
+        zohoId: { type: string }
+        name: { type: string }
+        prefix: { type: [string, "null"] }
+        projNo: { type: [string, "null"] }
+        status: { type: string, examples: [active, archived] }
+        boardType:
+          type: string
+          enum: [scrum, kanban, other]
+        description: { type: [string, "null"] }
+        ownerName: { type: [string, "null"] }
+        ownerZohoId: { type: [string, "null"] }
+        createdTime: { type: [string, "null"] }
+        backlogCount: { type: [integer, "null"] }
+        displayOrder: { type: integer }
+        hidden: { type: boolean }
+        statusBreakdown: { type: [string, "null"], description: JSON blob. }
+        statusGroups: { type: [string, "null"], description: 'JSON blob of {todo,doing,done}.' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        activeSprints:
+          type: array
+          description: Sprint snapshots currently active for this project.
+          items: { $ref: "#/components/schemas/SprintSnapshot" }
+
+    SprintSnapshot:
+      type: object
+      required: [zohoId, projectZohoId, projectName, name, status, totalTickets, hidden, createdAt, updatedAt]
+      properties:
+        zohoId: { type: string }
+        projectZohoId: { type: string }
+        projectName: { type: string }
+        name: { type: string }
+        status: { type: string }
+        startDate: { type: [string, "null"] }
+        endDate: { type: [string, "null"] }
+        totalTickets: { type: integer }
+        statusBreakdown: { type: [string, "null"] }
+        hidden: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    Sprint:
+      allOf:
+        - $ref: "#/components/schemas/SprintSnapshot"
+        - type: object
+          properties:
+            rawData: { type: [string, "null"], description: JSON blob. }
+
+    SprintHistoryItem:
+      type: object
+      required: [sprintId, sprintName, projectName, status, assigned, done, completionPct]
+      properties:
+        sprintId: { type: string }
+        sprintName: { type: string }
+        projectName: { type: string }
+        status: { type: string }
+        startDate: { type: [string, "null"] }
+        endDate: { type: [string, "null"] }
+        assigned: { type: integer }
+        done: { type: integer }
+        completionPct: { type: number }
+
+    EpicBreakdown:
+      type: object
+      required: [zohoId, name, total, todo, doing, done]
+      properties:
+        zohoId: { type: string }
+        name: { type: string }
+        total: { type: integer }
+        todo: { type: integer }
+        doing: { type: integer }
+        done: { type: integer }
+
+    UserLoadStat:
+      type: object
+      required: [userId, name, role, total, doing, todo, done, staleCount]
+      properties:
+        userId: { type: string }
+        name: { type: string }
+        role: { type: string }
+        total: { type: integer }
+        doing: { type: integer }
+        todo: { type: integer }
+        done: { type: integer }
+        staleCount: { type: integer }
+        overdueCount: { type: integer }
+
+    UserRaiserStat:
+      type: object
+      required: [id, name, role, todo, doing, done]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        role: { type: string }
+        todo: { type: integer }
+        doing: { type: integer }
+        done: { type: integer }
+
+    IssueItem:
+      type: object
+      description: |
+        Computed query DTO. Includes `isStale` and `delayedDays` evaluated
+        in JS at request time; never stored on the `Issue` row.
+      required:
+        - zohoId
+        - itemNo
+        - title
+        - status
+        - statusGroup
+      properties:
+        zohoId: { type: string }
+        sprintZohoId: { type: string }
+        projectZohoId: { type: string }
+        itemNo: { type: string }
+        title: { type: string }
+        status: { type: string }
+        statusGroup:
+          type: string
+          enum: [todo, doing, done]
+        epicId: { type: [string, "null"] }
+        creator:
+          type: [object, "null"]
+          properties:
+            id: { type: string }
+            name: { type: string }
+            role: { type: string }
+        assignees:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              role: { type: string }
+        createdAt: { type: [string, "null"] }
+        endDate: { type: [string, "null"] }
+        isStale: { type: boolean, description: Computed; never stored. }
+        delayedDays: { type: integer, description: Computed; never stored. }
+        _important: { type: boolean, description: Set when `important=true` filter was requested. }
+
+    IssueSearchHit:
+      type: object
+      required: [zohoId, itemNo, title]
+      properties:
+        zohoId: { type: string }
+        itemNo: { type: string }
+        title: { type: string }
+
+    DeletedIssue:
+      type: object
+      required: [zohoId, itemNo, title, status, sprintZohoId, projectZohoId, deletedAt, missingSyncCount]
+      properties:
+        zohoId: { type: string }
+        itemNo: { type: string }
+        title: { type: string }
+        status: { type: string }
+        sprintZohoId: { type: string }
+        projectZohoId: { type: string }
+        deletedAt: { type: [string, "null"], format: date-time }
+        missingSyncCount: { type: integer }
+
+    Watchlist:
+      type: object
+      required: [id, boardId, issueId, userId, important, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        boardId: { type: string }
+        issueId: { type: string }
+        userId: { type: string }
+        important: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        hasDeadline:
+          type: boolean
+          description: Computed; only present on list responses.
+
+    Note:
+      type: object
+      required: [id, userId, title, content, issueIds, taggedUserIds, state, deadlineNotified, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string }
+        title: { type: string }
+        content: { type: string, description: Markdown source. }
+        issueIds:
+          type: string
+          description: JSON string of issue Zoho IDs.
+        taggedUserIds:
+          type: string
+          description: JSON string of mentioned user Zoho IDs.
+        state:
+          type: string
+          enum: [active, closed]
+        deadline:
+          type: [string, "null"]
+          format: date-time
+        deadlineGroupId:
+          type: [string, "null"]
+          format: uuid
+        deadlineNotified: { type: boolean }
+        isOverdue:
+          type: boolean
+          description: Only present on `/with-deadlines` responses.
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    Deadline:
+      type: object
+      required: [id, userId, title, dueDate, completed, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        boardId: { type: [string, "null"] }
+        issueId: { type: [string, "null"] }
+        userId: { type: string }
+        title: { type: string }
+        dueDate: { type: string, format: date-time }
+        deadlineGroupId: { type: [string, "null"], format: uuid }
+        completed: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    CombinedDeadline:
+      type: object
+      required: [id, title, dueDate, isOverdue, subItems]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        dueDate: { type: string, format: date-time }
+        isOverdue: { type: boolean }
+        subItems:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [deadline, note]
+              id: { type: string }
+              boardId: { type: [string, "null"] }
+              issueId: { type: [string, "null"] }
+              completed: { type: boolean }
+
+    AvailableWatchlistItem:
+      type: object
+      required: [boardId, issueId, issueTitle, issueItemNo]
+      properties:
+        boardId: { type: string }
+        issueId: { type: string }
+        issueTitle: { type: string }
+        issueItemNo: { type: string }
+
+    ActivityNotification:
+      type: object
+      required: [id, userId, type, read, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string }
+        type:
+          type: string
+          enum: [status_change, deadline_reminder, deadline_day_of, deadline_overdue]
+        issueId: { type: [string, "null"] }
+        boardId: { type: [string, "null"] }
+        noteId: { type: [string, "null"], format: uuid }
+        oldStatus: { type: string }
+        newStatus: { type: string }
+        message: { type: string }
+        read: { type: boolean }
+        createdAt: { type: string, format: date-time }
+
+    ActivitySummary:
+      type: object
+      required: [unreadNotifications, upcomingDeadlines, importantIssues]
+      properties:
+        unreadNotifications: { type: integer }
+        upcomingDeadlines: { type: integer }
+        importantIssues: { type: integer }
+
+    HealthResponse:
+      type: object
+      required: [status, timestamp]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        timestamp: { type: string, format: date-time }
+
+    StatusResponse:
+      type: object
+      description: Zoho connectivity check. Even when `connected=false` the endpoint still returns `200`.
+      required: [connected]
+      properties:
+        connected: { type: boolean }
+        tokenExpiresAt: { type: [string, "null"], format: date-time }
+        myTeamId: { type: [string, "null"] }
+        defaultPortalId: { type: [string, "null"] }
+        portals:
+          type: array
+          items:
+            type: object
+            properties:
+              zsoid: { type: string }
+              name: { type: string }
+              orgName: { type: string }
+              type: { type: string }
+        error: { type: [string, "null"] }
+        zohoStatus: { type: [integer, "null"] }
+        zohoUrl: { type: [string, "null"] }
+
+    ConfigResponse:
+      type: object
+      required: [workspaceName]
+      properties:
+        workspaceName:
+          type: string
+          description: Display name for the Zoho workspace. Empty string on lookup failure.
+
+    SyncStatus:
+      type: object
+      required: [lastSyncedAt]
+      properties:
+        lastSyncedAt:
+          type: [string, "null"]
+          format: date-time
+
+    SyncProgress:
+      type: object
+      required: [inProgress, isFirstSync]
+      properties:
+        inProgress: { type: boolean }
+        percentage:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 1
+        requestsMade: { type: integer }
+        totalRequests: { type: integer }
+        isFirstSync: { type: boolean }
+
+    BurndownSnapshot:
+      type: object
+      required: [date, doneCount, totalCount]
+      properties:
+        date:
+          type: string
+          description: "YYYY-MM-DD"
+        doneCount: { type: integer }
+        totalCount: { type: integer }
+
+    BacklogStatsSummary:
+      type: object
+      required: [total, staleCount, statusGroups]
+      properties:
+        total: { type: integer }
+        staleCount: { type: integer }
+        statusGroups:
+          type: object
+          required: [todo, doing, done]
+          properties:
+            todo: { type: integer }
+            doing: { type: integer }
+            done: { type: integer }
+
+    BacklogStatsResponse:
+      type: object
+      required: [summary, oldestItems, assignees]
+      properties:
+        summary: { $ref: "#/components/schemas/BacklogStatsSummary" }
+        oldestItems:
+          type: array
+          items: { $ref: "#/components/schemas/IssueItem" }
+        assignees:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              role: { type: string }
+              count: { type: integer }
+
+    SprintDebugResponse:
+      type: object
+      required: [projectId, statuses, backlogItems, boardItems]
+      properties:
+        projectId: { type: string }
+        statuses:
+          type: object
+          additionalProperties: { type: string, enum: [todo, doing, done] }
+          description: Mapping of Zoho status name → bucket.
+        backlogId: { type: [string, "null"] }
+        backlogItems:
+          type: object
+          required: [total, statusCounts]
+          properties:
+            total: { type: integer }
+            statusCounts:
+              type: object
+              additionalProperties: { type: integer }
+        kanbanBoardId: { type: [string, "null"] }
+        boardItems:
+          type: object
+          required: [total, statusCounts]
+          properties:
+            total: { type: integer }
+            statusCounts:
+              type: object
+              additionalProperties: { type: integer }
+
+    UserProfileResponse:
+      type: object
+      required: [user, issues, raisedIssues, summary, sprintCount, staleDays]
+      properties:
+        user:
+          type: object
+          required: [zohoId, name, email, role]
+          properties:
+            zohoId: { type: string }
+            name: { type: string }
+            email: { type: [string, "null"] }
+            role: { type: string }
+        issues:
+          type: array
+          items: { $ref: "#/components/schemas/IssueItem" }
+        raisedIssues:
+          type: array
+          items: { $ref: "#/components/schemas/IssueItem" }
+        summary:
+          type: object
+          required: [total, todo, doing, done, stale, overdue, collab, raised]
+          properties:
+            total: { type: integer }
+            todo: { type: integer }
+            doing: { type: integer }
+            done: { type: integer }
+            stale: { type: integer }
+            overdue: { type: integer }
+            collab: { type: integer }
+            raised: { type: integer }
+        sprintCount: { type: integer }
+        staleDays: { type: integer }
+
+    TeamLoadResponse:
+      type: object
+      required: [users, sprintCount, projectCount, staleDays]
+      properties:
+        users:
+          type: array
+          items: { $ref: "#/components/schemas/UserLoadStat" }
+        sprintCount: { type: integer }
+        projectCount: { type: integer }
+        staleDays: { type: integer }
+
+    StaleCountResponse:
+      type: object
+      required: [staleCount]
+      properties:
+        staleCount: { type: integer }
+
+    WatchlistToggleResponse:
+      type: object
+      required: [watchlist]
+      properties:
+        watchlist: { $ref: "#/components/schemas/Watchlist" }
+
+    BatchDeadlineResponse:
+      type: object
+      required: [groupId, updatedNotes, createdDeadlines]
+      properties:
+        groupId: { type: string, format: uuid }
+        updatedNotes: { type: integer }
+        createdDeadlines: { type: integer }
+
+    DeadlineGroupPatchResponse:
+      type: object
+      required: [groupId, updatedNotes, addedDeadlines, removedDeadlines]
+      properties:
+        groupId: { type: string, format: uuid }
+        updatedNotes: { type: integer }
+        addedDeadlines: { type: integer }
+        removedDeadlines: { type: integer }
+
+    DeadlineGroupDeleteResponse:
+      type: object
+      required: [deleted, clearedNotes, deletedDeadlines]
+      properties:
+        deleted: { type: boolean }
+        clearedNotes: { type: integer }
+        deletedDeadlines: { type: integer }
+
+    PastSprintName:
+      type: object
+      required: [zohoId, name, startDate, endDate, status]
+      properties:
+        zohoId: { type: string }
+        name: { type: string }
+        startDate: { type: [string, "null"] }
+        endDate: { type: [string, "null"] }
+        status: { type: string }
+
+  # Reusable request bodies --------------------------------------------
+  requestBodies: {}
+
+  responses:
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ServerError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadRequest:
+      description: Validation failure.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+# Paths ---------------------------------------------------------------
+
+paths:
+
+  # ---------- Health, status, config, sync ----------------------------
+  /api/health:
+    get:
+      tags: [Health]
+      operationId: getHealth
+      summary: Liveness probe.
+      responses:
+        "200":
+          description: Server is up.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+
+  /api/status:
+    get:
+      tags: [Health]
+      operationId: getStatus
+      summary: Zoho OAuth token, team, and portal state.
+      description: |
+        Always returns `200`. When `connected=false`, `error` describes the
+        underlying failure (token refresh, network, missing portal, etc.).
+      responses:
+        "200":
+          description: Connectivity snapshot.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+
+  /api/config:
+    get:
+      tags: [Health]
+      operationId: getConfig
+      summary: Frontend configuration values (workspace name).
+      responses:
+        "200":
+          description: Configuration payload.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigResponse" }
+
+  /api/sync:
+    get:
+      tags: [Sync]
+      operationId: getSyncStatus
+      summary: Last successful sync timestamp.
+      responses:
+        "200":
+          description: Sync state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SyncStatus" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/sync/progress:
+    get:
+      tags: [Sync]
+      operationId: getSyncProgress
+      summary: Live sync progress (used by the in-app progress bar).
+      responses:
+        "200":
+          description: Progress snapshot.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SyncProgress" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/sprints/sync:
+    post:
+      tags: [Sync]
+      operationId: triggerSprintSync
+      summary: Trigger a manual sprint/issue sync (fire-and-forget).
+      description: |
+        Returns immediately. Background errors are logged but never
+        returned to the caller. Progress is observable via
+        `GET /api/sync/progress`.
+      responses:
+        "200":
+          description: Sync started.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  synced: { type: integer, description: Always 0 in the immediate response. }
+                  sprints:
+                    type: array
+                    items: { $ref: "#/components/schemas/Sprint" }
+                  status: { type: string, enum: [started] }
+
+  /api/sprints/fetch-past:
+    post:
+      tags: [Sprints]
+      operationId: fetchPastSprints
+      summary: Fetch historical sprint data from Zoho.
+      description: |
+        Two modes depending on whether `sprintZohoId` is supplied:
+
+        - **List mode** (no `sprintZohoId`): returns a list of past sprint names.
+        - **Data mode** (`sprintZohoId` provided): returns the fetched sprint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectZohoId]
+              properties:
+                projectZohoId: { type: string }
+                sprintZohoId: { type: string }
+      responses:
+        "200":
+          description: Past sprint list or single sprint.
+          content:
+            application/json:
+              schema:
+                # Two response shapes: a list of past-sprint names, or a
+                # single fetched sprint object. The frontend discriminates
+                # based on whether the body sent `sprintZohoId`.
+                oneOf:
+                  - type: object
+                    required: [sprints]
+                    properties:
+                      sprints:
+                        type: array
+                        items: { $ref: "#/components/schemas/PastSprintName" }
+                  - type: object
+                    required: [sprint]
+                    properties:
+                      sprint: { $ref: "#/components/schemas/Sprint" }
+                # Don't allow arbitrary extra keys at the response root —
+                # OpenAPI 3.1's `unevaluatedProperties` rule then accepts
+                # the schema cleanly.
+                unevaluatedProperties: false
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---------- Users ---------------------------------------------------
+  /api/users:
+    get:
+      tags: [Users]
+      operationId: listUsers
+      summary: All known users.
+      responses:
+        "200":
+          description: User roster.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users, total]
+                properties:
+                  users:
+                    type: array
+                    items: { $ref: "#/components/schemas/User" }
+                  total: { type: integer }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/users/sync:
+    post:
+      tags: [Users]
+      operationId: syncUsers
+      summary: Trigger a user sync from Zoho.
+      responses:
+        "200":
+          description: Users upserted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [synced, users]
+                properties:
+                  synced: { type: integer }
+                  users:
+                    type: array
+                    items: { $ref: "#/components/schemas/User" }
+        "502":
+          description: Zoho returned zero users.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/users/{id}/profile:
+    get:
+      tags: [Users]
+      operationId: getUserProfile
+      summary: Per-user issue breakdown.
+      parameters:
+        - $ref: "#/components/parameters/StaleDays"
+        - $ref: "#/components/parameters/WatchedStates"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Profile payload.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserProfileResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/users/{id}/sprint-history:
+    get:
+      tags: [Users]
+      operationId: getUserSprintHistory
+      summary: All sprints the user has been involved with.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Sprint history.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [history, total]
+                properties:
+                  history:
+                    type: array
+                    items: { $ref: "#/components/schemas/SprintHistoryItem" }
+                  total: { type: integer }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/users/{id}/role:
+    patch:
+      tags: [Users]
+      operationId: setUserRole
+      summary: Set a user's locally-mutable role.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  type: string
+                  enum: [DEV, QA, PROD, OTHER]
+      responses:
+        "200":
+          description: Updated user.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  # ---------- Team ----------------------------------------------------
+  /api/team/load:
+    get:
+      tags: [Team]
+      operationId: getTeamLoad
+      summary: Aggregate team workload across all sprints.
+      parameters:
+        - $ref: "#/components/parameters/StaleDays"
+        - $ref: "#/components/parameters/WatchedStates"
+      responses:
+        "200":
+          description: Team load payload.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TeamLoadResponse" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  # ---------- Projects ------------------------------------------------
+  /api/projects:
+    get:
+      tags: [Projects]
+      operationId: listProjects
+      summary: All projects with current active sprints.
+      responses:
+        "200":
+          description: Project list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [projects, total]
+                properties:
+                  projects:
+                    type: array
+                    items: { $ref: "#/components/schemas/Project" }
+                  total: { type: integer }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/projects/sync:
+    post:
+      tags: [Projects]
+      operationId: syncProjects
+      summary: Trigger a project list sync from Zoho (fire-and-forget).
+      responses:
+        "200":
+          description: Sync started.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  synced: { type: integer }
+                  projects:
+                    type: array
+                    items: { $ref: "#/components/schemas/Project" }
+
+  /api/projects/reorder:
+    post:
+      tags: [Projects]
+      operationId: reorderProjects
+      summary: Batch-update display order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderedIds]
+              properties:
+                orderedIds:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: Reorder applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reordered: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/projects/{id}:
+    get:
+      tags: [Projects]
+      operationId: getProject
+      summary: Project detail with active sprints.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Project detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project]
+                properties:
+                  project: { $ref: "#/components/schemas/Project" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/projects/{id}/board-type:
+    patch:
+      tags: [Projects]
+      operationId: setProjectBoardType
+      summary: Update a project's board type.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [boardType]
+              properties:
+                boardType:
+                  type: string
+                  enum: [scrum, kanban, other]
+      responses:
+        "200":
+          description: Updated project.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project]
+                properties:
+                  project: { $ref: "#/components/schemas/Project" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/projects/{id}/display:
+    patch:
+      tags: [Projects]
+      operationId: setProjectDisplay
+      summary: Update visibility and display order.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hidden: { type: boolean }
+                displayOrder: { type: integer }
+      responses:
+        "200":
+          description: Updated project.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [project]
+                properties:
+                  project: { $ref: "#/components/schemas/Project" }
+
+  /api/projects/{id}/sprints/{sprintId}/issues:
+    get:
+      tags: [Projects]
+      operationId: listSprintIssues
+      summary: Issues within a sprint, with computed staleness/delay.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sprintId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: statusGroup
+          in: query
+          schema: { type: string, enum: [todo, doing, done] }
+        - name: epicId
+          in: query
+          schema: { type: string }
+        - name: userId
+          in: query
+          schema: { type: string }
+        - name: creatorOnly
+          in: query
+          schema: { type: boolean }
+        - name: stale
+          in: query
+          schema: { type: boolean }
+        - name: important
+          in: query
+          schema: { type: boolean }
+        - $ref: "#/components/parameters/StaleDays"
+        - $ref: "#/components/parameters/WatchedStates"
+      responses:
+        "200":
+          description: Issues in the sprint.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issues]
+                properties:
+                  issues:
+                    type: array
+                    items: { $ref: "#/components/schemas/IssueItem" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/projects/{id}/sprints/{sprintId}/epics:
+    get:
+      tags: [Projects]
+      operationId: listSprintEpics
+      summary: Epic-level breakdown for a sprint.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sprintId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/StaleDays"
+        - $ref: "#/components/parameters/WatchedStates"
+      responses:
+        "200":
+          description: Epic breakdown.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [epics, statusGroups]
+                properties:
+                  epics:
+                    type: array
+                    items: { $ref: "#/components/schemas/EpicBreakdown" }
+                  statusGroups:
+                    type: object
+                    additionalProperties:
+                      type: string
+                      enum: [todo, doing, done]
+
+  /api/projects/{id}/sprints/{sprintId}/user-stats:
+    get:
+      tags: [Projects]
+      operationId: listSprintUserStats
+      summary: Per-user load stats for a sprint.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sprintId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/StaleDays"
+        - $ref: "#/components/parameters/WatchedStates"
+      responses:
+        "200":
+          description: Per-user load stats.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users, totalStaleIssues]
+                properties:
+                  users:
+                    type: array
+                    items: { $ref: "#/components/schemas/UserLoadStat" }
+                  totalStaleIssues: { type: integer }
+
+  /api/projects/{id}/sprints/{sprintId}/raiser-stats:
+    get:
+      tags: [Projects]
+      operationId: listSprintRaiserStats
+      summary: Per-creator ticket stats for a sprint.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sprintId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Raiser stats.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [raisers]
+                properties:
+                  raisers:
+                    type: array
+                    items: { $ref: "#/components/schemas/UserRaiserStat" }
+
+  /api/projects/{id}/kanban/issues:
+    get:
+      tags: [Projects]
+      operationId: listKanbanIssues
+      summary: Issues on the Kanban board (no sprint filter).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: statusGroup
+          in: query
+          schema: { type: string, enum: [todo, doing, done] }
+        - name: userId
+          in: query
+          schema: { type: string }
+        - name: creatorOnly
+          in: query
+          schema: { type: boolean }
+        - name: stale
+          in: query
+          schema: { type: boolean }
+        - name: important
+          in: query
+          schema: { type: boolean }
+        - $ref: "#/components/parameters/StaleDays"
+        - $ref: "#/components/parameters/WatchedStates"
+      responses:
+        "200":
+          description: Kanban issues.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issues]
+                properties:
+                  issues:
+                    type: array
+                    items: { $ref: "#/components/schemas/IssueItem" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/projects/{id}/kanban-user-stats:
+    get:
+      tags: [Projects]
+      operationId: listKanbanUserStats
+      summary: Per-user load stats across the Kanban board.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: userId
+          in: query
+          schema: { type: string }
+        - name: creatorOnly
+          in: query
+          schema: { type: boolean }
+        - $ref: "#/components/parameters/StaleDays"
+        - $ref: "#/components/parameters/WatchedStates"
+      responses:
+        "200":
+          description: User stats.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users, totalStaleIssues]
+                properties:
+                  users:
+                    type: array
+                    items: { $ref: "#/components/schemas/UserLoadStat" }
+                  totalStaleIssues: { type: integer }
+
+  /api/projects/{id}/kanban-raiser-stats:
+    get:
+      tags: [Projects]
+      operationId: listKanbanRaiserStats
+      summary: Per-creator stats across the Kanban board.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Raiser stats.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [raisers]
+                properties:
+                  raisers:
+                    type: array
+                    items: { $ref: "#/components/schemas/UserRaiserStat" }
+
+  /api/projects/{id}/kanban/stale-count:
+    get:
+      tags: [Projects]
+      operationId: getKanbanStaleCount
+      summary: Number of stale issues on the Kanban board.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/StaleDays"
+        - $ref: "#/components/parameters/WatchedStates"
+      responses:
+        "200":
+          description: Stale count.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StaleCountResponse" }
+
+  /api/projects/{id}/backlog/issues:
+    get:
+      tags: [Projects]
+      operationId: listBacklogIssues
+      summary: Project backlog issues with filters.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: statusGroup
+          in: query
+          schema: { type: string, enum: [todo, doing, done] }
+        - name: epicId
+          in: query
+          schema: { type: string }
+        - name: userId
+          in: query
+          schema: { type: string }
+        - name: creatorOnly
+          in: query
+          schema: { type: boolean }
+        - name: stale
+          in: query
+          schema: { type: boolean }
+        - $ref: "#/components/parameters/StaleDays"
+        - $ref: "#/components/parameters/WatchedStates"
+      responses:
+        "200":
+          description: Backlog issues.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issues]
+                properties:
+                  issues:
+                    type: array
+                    items: { $ref: "#/components/schemas/IssueItem" }
+
+  /api/projects/{id}/backlog-stats:
+    get:
+      tags: [Projects]
+      operationId: getBacklogStats
+      summary: Backlog summary, oldest items, and assignees.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/StaleDays"
+        - $ref: "#/components/parameters/WatchedStates"
+      responses:
+        "200":
+          description: Backlog stats.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BacklogStatsResponse" }
+
+  # ---------- Sprints & burndown --------------------------------------
+  /api/sprints:
+    get:
+      tags: [Sprints]
+      operationId: listSprints
+      summary: All known sprints.
+      responses:
+        "200":
+          description: Sprints.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sprints, total]
+                properties:
+                  sprints:
+                    type: array
+                    items: { $ref: "#/components/schemas/Sprint" }
+                  total: { type: integer }
+
+  /api/sprints/debug/{projectId}:
+    get:
+      tags: [Sprints]
+      operationId: debugSprint
+      summary: |
+        Live Zoho diagnostic dump for a project (status buckets, backlog
+        and board counts). Makes live Zoho calls — bypasses the local-first
+        cache. Intended for debugging only.
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Debug payload.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SprintDebugResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  /api/sprints/{id}/display:
+    patch:
+      tags: [Sprints]
+      operationId: setSprintDisplay
+      summary: Hide or show a sprint.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hidden: { type: boolean }
+      responses:
+        "200":
+          description: Updated sprint.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sprint]
+                properties:
+                  sprint: { $ref: "#/components/schemas/Sprint" }
+
+  /api/sprints/{sprintZohoId}/burndown:
+    get:
+      tags: [Burndown]
+      operationId: getBurndown
+      summary: |
+        Daily burndown snapshots. When both `doneCount` and `totalCount`
+        are supplied and `totalCount > 0`, today's snapshot is upserted
+        before the list is returned.
+      parameters:
+        - name: sprintZohoId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: doneCount
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: totalCount
+          in: query
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: Burndown snapshots.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [snapshots]
+                properties:
+                  snapshots:
+                    type: array
+                    items: { $ref: "#/components/schemas/BurndownSnapshot" }
+        "500": { $ref: "#/components/responses/ServerError" }
+
+  # ---------- Issues --------------------------------------------------
+  /api/issues/{issueId}:
+    get:
+      tags: [Issues]
+      operationId: getIssue
+      summary: Single issue by Zoho ID.
+      parameters:
+        - name: issueId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Issue detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issue]
+                properties:
+                  issue: { $ref: "#/components/schemas/IssueItem" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/issues/deleted:
+    get:
+      tags: [Issues]
+      operationId: listDeletedIssues
+      summary: Soft-deleted issues (deleted locally, missing from Zoho).
+      responses:
+        "200":
+          description: Deleted-issue audit list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issues]
+                properties:
+                  issues:
+                    type: array
+                    items: { $ref: "#/components/schemas/DeletedIssue" }
+
+  # ---------- Notes ---------------------------------------------------
+  /api/notes:
+    get:
+      tags: [Notes]
+      operationId: listNotes
+      summary: List notes (filter by userId/state).
+      parameters:
+        - name: userId
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string, enum: [active, closed] }
+      responses:
+        "200":
+          description: Notes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [notes, total]
+                properties:
+                  notes:
+                    type: array
+                    items: { $ref: "#/components/schemas/Note" }
+                  total: { type: integer }
+    post:
+      tags: [Notes]
+      operationId: createNote
+      summary: Create a note.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId: { type: string }
+                title: { type: string }
+                content: { type: string }
+                issueIds:
+                  type: array
+                  items: { type: string }
+                taggedUserIds:
+                  type: array
+                  items: { type: string }
+                state:
+                  type: string
+                  enum: [active, closed]
+                deadline:
+                  type: string
+                  format: date-time
+      responses:
+        "200":
+          description: Created note.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [note]
+                properties:
+                  note: { $ref: "#/components/schemas/Note" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/notes/with-deadlines:
+    get:
+      tags: [Notes]
+      operationId: listNotesWithDeadlines
+      summary: Notes that have a deadline (optionally scoped to a user).
+      parameters:
+        - name: userId
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Notes with deadlines.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [notes]
+                properties:
+                  notes:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Note"
+                        - type: object
+                          required: [isOverdue]
+                          properties:
+                            isOverdue: { type: boolean }
+
+  /api/notes/search-users:
+    get:
+      tags: [Notes]
+      operationId: searchUsersForNoteMention
+      summary: Search users for @mentions (case-sensitive substring).
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: User matches.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items: { $ref: "#/components/schemas/UserSearchHit" }
+
+  /api/notes/search-issues:
+    get:
+      tags: [Notes]
+      operationId: searchIssuesForNoteLink
+      summary: Search issues for note linking (case-sensitive substring).
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/BoardIdQuery"
+      responses:
+        "200":
+          description: Issue matches.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  issues:
+                    type: array
+                    items: { $ref: "#/components/schemas/IssueSearchHit" }
+
+  /api/notes/{noteId}:
+    get:
+      tags: [Notes]
+      operationId: getNote
+      summary: Fetch a note by UUID.
+      parameters:
+        - name: noteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Note.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [note]
+                properties:
+                  note: { $ref: "#/components/schemas/Note" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Notes]
+      operationId: updateNote
+      summary: Partial update for a note.
+      parameters:
+        - name: noteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                title: { type: string }
+                content: { type: string }
+                issueIds:
+                  type: array
+                  items: { type: string }
+                taggedUserIds:
+                  type: array
+                  items: { type: string }
+                state:
+                  type: string
+                  enum: [active, closed]
+                deadline:
+                  type: [string, "null"]
+                  format: date-time
+                deadlineNotified: { type: boolean }
+      responses:
+        "200":
+          description: Updated note.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [note]
+                properties:
+                  note: { $ref: "#/components/schemas/Note" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+    delete:
+      tags: [Notes]
+      operationId: deleteNote
+      summary: Delete a note. Refuses if the note still has a deadline.
+      parameters:
+        - name: noteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deleted" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  # ---------- Deadlines ----------------------------------------------
+  /api/deadlines:
+    get:
+      tags: [Deadlines]
+      operationId: listDeadlines
+      summary: List deadlines (filter by userId/boardId).
+      parameters:
+        - name: userId
+          in: query
+          schema: { type: string }
+        - $ref: "#/components/parameters/BoardIdQuery"
+      responses:
+        "200":
+          description: Deadlines.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deadlines, total]
+                properties:
+                  deadlines:
+                    type: array
+                    items: { $ref: "#/components/schemas/Deadline" }
+                  total: { type: integer }
+    post:
+      tags: [Deadlines]
+      operationId: createDeadline
+      summary: Create a deadline reminder.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, title, dueDate]
+              properties:
+                userId: { type: string }
+                title: { type: string }
+                dueDate: { type: string, format: date-time }
+                boardId: { type: [string, "null"] }
+                issueId: { type: [string, "null"] }
+                completed: { type: boolean }
+      responses:
+        "200":
+          description: Created deadline.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deadline]
+                properties:
+                  deadline: { $ref: "#/components/schemas/Deadline" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/deadlines/{deadlineId}:
+    patch:
+      tags: [Deadlines]
+      operationId: updateDeadline
+      summary: Partial update for a deadline.
+      parameters:
+        - name: deadlineId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                title: { type: string }
+                dueDate: { type: string, format: date-time }
+                boardId: { type: [string, "null"] }
+                issueId: { type: [string, "null"] }
+                completed: { type: boolean }
+      responses:
+        "200":
+          description: Updated deadline.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deadline]
+                properties:
+                  deadline: { $ref: "#/components/schemas/Deadline" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+    delete:
+      tags: [Deadlines]
+      operationId: deleteDeadline
+      summary: Delete a deadline by UUID.
+      parameters:
+        - name: deadlineId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deleted" }
+
+  /api/deadlines/combined:
+    get:
+      tags: [Deadlines]
+      operationId: listCombinedDeadlines
+      summary: Deadlines and note deadlines merged into group/sub-item rows.
+      parameters:
+        - name: userId
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Combined deadlines.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deadlines]
+                properties:
+                  deadlines:
+                    type: array
+                    items: { $ref: "#/components/schemas/CombinedDeadline" }
+
+  /api/deadlines/upcoming:
+    get:
+      tags: [Deadlines]
+      operationId: listUpcomingDeadlines
+      summary: Deadlines due within the next N hours (default 24).
+      parameters:
+        - name: userId
+          in: query
+          schema: { type: string }
+        - name: hours
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 24
+      responses:
+        "200":
+          description: Upcoming deadlines.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deadlines, total]
+                properties:
+                  deadlines:
+                    type: array
+                    items: { $ref: "#/components/schemas/Deadline" }
+                  total: { type: integer }
+
+  /api/deadlines/available-watchlist:
+    get:
+      tags: [Deadlines]
+      operationId: listAvailableWatchlist
+      summary: Watchlist items eligible for batch-deadline creation.
+      parameters:
+        - name: excludeGroupId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Available watchlist items.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AvailableWatchlistItem" }
+
+  /api/deadlines/batch:
+    post:
+      tags: [Deadlines]
+      operationId: createBatchDeadlines
+      summary: Create a `DeadlineGroup` with note and/or watchlist deadlines.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dueDate, title]
+              properties:
+                dueDate: { type: string, format: date-time }
+                title: { type: string }
+                userId: { type: string }
+                noteIds:
+                  type: array
+                  items: { type: string, format: uuid }
+                watchlistItems:
+                  type: array
+                  items:
+                    type: object
+                    required: [boardId, issueId]
+                    properties:
+                      boardId: { type: string }
+                      issueId: { type: string }
+      responses:
+        "200":
+          description: Batch created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BatchDeadlineResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/deadlines/groups/{groupId}:
+    patch:
+      tags: [Deadlines]
+      operationId: updateDeadlineGroup
+      summary: Update a deadline group's title, dueDate, or members.
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                title: { type: string }
+                dueDate: { type: string, format: date-time }
+                noteIds:
+                  type: array
+                  items: { type: string, format: uuid }
+                watchlistItems:
+                  type: array
+                  items:
+                    type: object
+                    required: [boardId, issueId]
+                    properties:
+                      boardId: { type: string }
+                      issueId: { type: string }
+                userId: { type: string }
+      responses:
+        "200":
+          description: Updated group.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeadlineGroupPatchResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Deadlines]
+      operationId: deleteDeadlineGroup
+      summary: |
+        Delete a group. Synthetic IDs `standalone-deadline-{id}` and
+        `standalone-note-{id}` are also accepted to clean up lone items.
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deleted group.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeadlineGroupDeleteResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---------- Watchlist ----------------------------------------------
+  /api/watchlist:
+    get:
+      tags: [Watchlist]
+      operationId: listWatchlist
+      summary: List watchlist entries (filter by boardId/userId).
+      parameters:
+        - $ref: "#/components/parameters/BoardIdQuery"
+        - $ref: "#/components/parameters/UserIdQuery"
+      responses:
+        "200":
+          description: Watchlist entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watchlist, total]
+                properties:
+                  watchlist:
+                    type: array
+                    items: { $ref: "#/components/schemas/Watchlist" }
+                  total: { type: integer }
+    post:
+      tags: [Watchlist]
+      operationId: upsertWatchlist
+      summary: Add or update a watchlist entry (upsert).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [boardId, issueId, userId]
+              properties:
+                boardId: { type: string }
+                issueId: { type: string }
+                userId: { type: string }
+                important: { type: boolean }
+      responses:
+        "200":
+          description: Watchlist entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WatchlistToggleResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/watchlist/{issueId}/toggle-important:
+    patch:
+      tags: [Watchlist]
+      operationId: toggleWatchlistImportant
+      summary: |
+        Flip the `important` flag for an issue. Creates the entry if
+        missing (requires `boardId` and `userId` in the body).
+      parameters:
+        - name: issueId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                boardId: { type: string }
+                userId: { type: string }
+      responses:
+        "200":
+          description: Updated entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WatchlistToggleResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/watchlist/{issueId}:
+    delete:
+      tags: [Watchlist]
+      operationId: deleteWatchlist
+      summary: |
+        Remove a watchlist entry. With no body, all entries for the issue
+        are deleted; supplying `boardId`/`userId` scopes the deletion.
+      parameters:
+        - name: issueId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                boardId: { type: string }
+                userId: { type: string }
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deleted" }
+
+  # ---------- Activity -----------------------------------------------
+  /api/activity/notifications:
+    get:
+      tags: [Activity]
+      operationId: listNotifications
+      summary: Activity notifications (filter by userId, read state).
+      parameters:
+        - name: userId
+          in: query
+          schema: { type: string }
+        - name: read
+          in: query
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Notifications.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [notifications, total]
+                properties:
+                  notifications:
+                    type: array
+                    items: { $ref: "#/components/schemas/ActivityNotification" }
+                  total: { type: integer }
+    delete:
+      tags: [Activity]
+      operationId: clearReadNotifications
+      summary: Delete all read notifications for a user (or globally).
+      parameters:
+        - name: userId
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Cleared.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: integer }
+
+  /api/activity/notifications/{id}/read:
+    patch:
+      tags: [Activity]
+      operationId: markNotificationRead
+      summary: Mark a notification as read.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Updated notification.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [notification]
+                properties:
+                  notification: { $ref: "#/components/schemas/ActivityNotification" }
+
+  /api/activity/summary:
+    get:
+      tags: [Activity]
+      operationId: getActivitySummary
+      summary: Unread notifications, upcoming deadlines, important issues counts.
+      parameters:
+        - name: userId
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Summary counts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActivitySummary" }
+
+  # ---------- Docs (self-documentation) ------------------------------
+  /api/openapi.json:
+    get:
+      tags: [Docs]
+      operationId: getOpenApiDocument
+      summary: The OpenAPI 3.1 document describing this API.
+      responses:
+        "200":
+          description: OpenAPI document.
+          content:
+            application/json: {}
+
+  /api/docs:
+    get:
+      tags: [Docs]
+      operationId: getSwaggerUi
+      summary: Interactive Swagger UI for the API.
+      responses:
+        "200":
+          description: Swagger UI HTML.
+          content:
+            text/html: {}
