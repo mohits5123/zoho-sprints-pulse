@@ -218,6 +218,8 @@ Change the cron expression to adjust sync frequency.
 
 ## API Reference
 
+The complete interactive API contract is available from the running backend at [`/api/docs`](http://localhost:3001/api/docs). The canonical OpenAPI 3.1 source is [`dashboard/backend/openapi/openapi.yaml`](dashboard/backend/openapi/openapi.yaml). See [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md) for validation, testing, and contribution guidance.
+
 ### Health and status
 
 | Method | Path | Description |
@@ -424,5 +426,5 @@ Zonaliser/
 - **Cold start proxy errors** — if the frontend loads before the backend is ready, Vite logs `ECONNREFUSED`. This resolves once the backend starts.
 - **No `.env` file support** — credentials must be exported from the shell environment. The backend does not call `dotenv`.
 - **Stale data window** — issues can be up to 1 hour old between scheduled syncs. Trigger a manual sync if fresher data is needed.
-- **No automated test suite** — validation is currently done via `tsx watch` and manual UI verification.
+- **Automated API validation** — OpenAPI contract validation and backend route tests run with `npm run openapi:validate` and `npm test` from `dashboard/backend`.
 - **CORS locked to `localhost:5173`** — change in `src/index.ts` if using a different frontend origin.

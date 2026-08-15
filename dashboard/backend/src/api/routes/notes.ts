@@ -72,95 +72,12 @@ router.post('/', async (req, res) => {
   }
 });
 
-router.get('/:noteId', async (req, res) => {
-  try {
-    const { noteId } = req.params;
-    const note = await prisma.note.findUnique({ where: { id: noteId } });
-    if (!note) {
-      res.status(404).json({ error: 'Note not found' });
-      return;
-    }
-    res.json({ note });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('Note fetch failed:', msg);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-router.patch('/:noteId', async (req, res) => {
-  try {
-    const { noteId } = req.params;
-    const { title, content, issueIds, taggedUserIds, state, deadline, deadlineNotified } = req.body as {
-      title?: string;
-      content?: string;
-      issueIds?: string[];
-      taggedUserIds?: string[];
-      state?: string;
-      deadline?: string | null;
-      deadlineNotified?: boolean;
-    };
-
-    const data: Record<string, unknown> = {};
-    if (title !== undefined) data.title = title;
-    if (content !== undefined) data.content = content;
-    if (issueIds !== undefined) data.issueIds = JSON.stringify(issueIds);
-    if (taggedUserIds !== undefined) data.taggedUserIds = JSON.stringify(taggedUserIds);
-    if (state !== undefined) {
-      if (state !== 'active' && state !== 'closed') {
-        res.status(400).json({ error: 'state must be "active" or "closed"' });
-        return;
-      }
-      data.state = state;
-    }
-    if (deadline !== undefined) {
-      if (deadline) {
-        const parsedDeadline = new Date(deadline);
-        if (isNaN(parsedDeadline.getTime())) {
-          res.status(400).json({ error: 'Invalid deadline date' });
-          return;
-        }
-        data.deadline = parsedDeadline;
-      } else {
-        data.deadline = null;
-      }
-    }
-    if (deadlineNotified !== undefined) data.deadlineNotified = deadlineNotified;
-
-    if (Object.keys(data).length === 0) {
-      res.status(400).json({ error: 'No fields to update' });
-      return;
-    }
-
-    const note = await prisma.note.update({ where: { id: noteId }, data });
-    res.json({ note });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('Note update failed:', msg);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-router.delete('/:noteId', async (req, res) => {
-  try {
-    const { noteId } = req.params;
-    // Check if the note has a deadline before allowing deletion
-    const note = await prisma.note.findUnique({ where: { id: noteId } });
-    if (note?.deadline) {
-      res.status(400).json({ 
-        error: 'Cannot delete note with active deadline. To delete this note: 1) Click "Edit" 2) Clear the deadline field 3) Save the note 4) Then delete it' 
-      });
-      return;
-    }
-    await prisma.note.delete({ where: { id: noteId } });
-    res.json({ deleted: true });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('Note delete failed:', msg);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
+// IMPORTANT (route order): Express matches in registration order.
+// Static paths (e.g. `/with-deadlines`, `/search-users`, `/search-issues`)
+// MUST be declared BEFORE `/:noteId`, otherwise the dynamic segment will
+// greedily capture "search-users" or "with-deadlines" as a note ID and
+// Prisma will return 404. Do not move the `/:noteId` handlers above these
+// static routes without understanding this behaviour.
 router.get('/with-deadlines', async (req, res) => {
   try {
     const { userId } = req.query;
@@ -239,6 +156,110 @@ router.get('/search-issues', async (req, res) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error('Issue search failed:', msg);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Fetch a single note by its UUID.
+ * NOTE: This route uses the `:noteId` dynamic segment, so it is registered
+ * LAST after all static routes (`/with-deadlines`, `/search-users`,
+ * `/search-issues`) to prevent Express from capturing those names as IDs.
+ */
+router.get('/:noteId', async (req, res) => {
+  try {
+    const { noteId } = req.params;
+    const note = await prisma.note.findUnique({ where: { id: noteId } });
+    if (!note) {
+      res.status(404).json({ error: 'Note not found' });
+      return;
+    }
+    res.json({ note });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('Note fetch failed:', msg);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Partial update for a single note.
+ * Registered after static routes for the same reason as `GET /:noteId`.
+ */
+router.patch('/:noteId', async (req, res) => {
+  try {
+    const { noteId } = req.params;
+    const { title, content, issueIds, taggedUserIds, state, deadline, deadlineNotified } = req.body as {
+      title?: string;
+      content?: string;
+      issueIds?: string[];
+      taggedUserIds?: string[];
+      state?: string;
+      deadline?: string | null;
+      deadlineNotified?: boolean;
+    };
+
+    const data: Record<string, unknown> = {};
+    if (title !== undefined) data.title = title;
+    if (content !== undefined) data.content = content;
+    if (issueIds !== undefined) data.issueIds = JSON.stringify(issueIds);
+    if (taggedUserIds !== undefined) data.taggedUserIds = JSON.stringify(taggedUserIds);
+    if (state !== undefined) {
+      if (state !== 'active' && state !== 'closed') {
+        res.status(400).json({ error: 'state must be "active" or "closed"' });
+        return;
+      }
+      data.state = state;
+    }
+    if (deadline !== undefined) {
+      if (deadline) {
+        const parsedDeadline = new Date(deadline);
+        if (isNaN(parsedDeadline.getTime())) {
+          res.status(400).json({ error: 'Invalid deadline date' });
+          return;
+        }
+        data.deadline = parsedDeadline;
+      } else {
+        data.deadline = null;
+      }
+    }
+    if (deadlineNotified !== undefined) data.deadlineNotified = deadlineNotified;
+
+    if (Object.keys(data).length === 0) {
+      res.status(400).json({ error: 'No fields to update' });
+      return;
+    }
+
+    const note = await prisma.note.update({ where: { id: noteId }, data });
+    res.json({ note });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('Note update failed:', msg);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Delete a single note by UUID.
+ * Refuses deletion when the note still has an active deadline (UX safety
+ * guard — user must clear the deadline via PATCH first).
+ */
+router.delete('/:noteId', async (req, res) => {
+  try {
+    const { noteId } = req.params;
+    // Check if the note has a deadline before allowing deletion
+    const note = await prisma.note.findUnique({ where: { id: noteId } });
+    if (note?.deadline) {
+      res.status(400).json({
+        error: 'Cannot delete note with active deadline. To delete this note: 1) Click "Edit" 2) Clear the deadline field 3) Save the note 4) Then delete it'
+      });
+      return;
+    }
+    await prisma.note.delete({ where: { id: noteId } });
+    res.json({ deleted: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    console.error('Note delete failed:', msg);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

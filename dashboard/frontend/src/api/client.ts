@@ -315,6 +315,7 @@ export interface IssueItem {
   title:       string;
   status:      string;
   statusGroup: string;
+  epicId:      string | null;
   creator:     { id: string; name: string; role: string } | null;
   assignees:   { id: string; name: string; role: string }[];
   createdAt:   string | null;
