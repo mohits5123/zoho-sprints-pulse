@@ -18,8 +18,6 @@ prisma/dev.db
 # IDE
 .idea/
 .vscode/
-# Allow MCP config — no secrets, needed for Copilot Chat RAG integration
-!.vscode/mcp.json
 *.swp
 *.swo
 .DS_Store
@@ -45,10 +43,3 @@ staged-review-report.txt
 
 plan/*
 tmp/*
-
-# RAG vector store and tooling (local only, rebuilt by `npm run rag:index`)
-rag/
-
-# Root-level workspace tooling (rag scripts wrapper)
-/package.json
-/package-lock.json

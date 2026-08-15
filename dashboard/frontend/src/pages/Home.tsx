@@ -1,7 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, FolderKanban, Timer, Bell, CheckCircle, Zap } from 'lucide-react';
-import { fetchStatus, fetchUsers, syncUsers, fetchProjects, syncProjects, fetchSprints, syncSprints, fetchActivitySummary, StatusResponse, ActivitySummary } from '../api/client';
+import { Activity, Users, FolderKanban, Timer, Bell, CheckCircle, Zap, ArrowRight } from 'lucide-react';
+import {
+  fetchStatus, fetchUsers, syncUsers, fetchProjects, syncProjects, fetchSprints, syncSprints,
+  fetchActivitySummary, StatusResponse, ActivitySummary,
+  fetchNotifications, markNotificationRead, fetchIssueById, fetchProject, fetchAppConfig, fetchNote,
+  type ActivityNotification,
+} from '../api/client';
 import { StatusBadge } from '../components/StatusBadge';
 import { SyncButton } from '../components/SyncButton';
 import { DashboardCard } from '../components/DashboardCard';
@@ -20,6 +25,119 @@ export function Home() {
   const [sprintCount, setSprintCount]     = useState<number | null>(null);
   const [activity, setActivity]           = useState<ActivitySummary | null>(null);
   const [syncError, setSyncError]         = useState<string | null>(null);
+
+  const [notifications, setNotifications] = useState<ActivityNotification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [issueDetails, setIssueDetails]   = useState<Map<string, { itemNo: string; projNo: string }>>(new Map());
+  const [noteDetails, setNoteDetails]     = useState<Map<string, string>>(new Map());
+  const [readIds, setReadIds]             = useState<Set<string>>(new Set());
+  const notificationRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showNotifications) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
+        setShowNotifications(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showNotifications]);
+
+  useEffect(() => {
+    fetchAppConfig().then(({ workspaceName: wn }) => setWorkspaceName(wn)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const loadNotifications = async () => {
+      try {
+        const { notifications: data } = await fetchNotifications();
+        setNotifications(data);
+      } catch (err) {
+        console.error('Failed to load notifications:', err);
+      }
+    };
+    loadNotifications();
+    const interval = setInterval(loadNotifications, 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (notifications.length === 0) return;
+    const fetchDetails = async () => {
+      const results = await Promise.all(
+        notifications.map(async (notif) => {
+          if (notif.type !== 'status_change' || !notif.issueId) return null;
+          const issue = await fetchIssueById(notif.issueId);
+          const project = notif.boardId ? await fetchProject(notif.boardId).catch(() => null) : null;
+          return {
+            issueId: notif.issueId,
+            itemNo: issue?.itemNo ?? '',
+            projNo: project?.project?.projNo ?? '',
+          };
+        })
+      );
+      const details = new Map<string, { itemNo: string; projNo: string }>();
+      for (const r of results) {
+        if (r && r.itemNo) details.set(r.issueId, { itemNo: r.itemNo, projNo: r.projNo });
+      }
+      setIssueDetails(details);
+    };
+    fetchDetails();
+  }, [notifications]);
+
+  useEffect(() => {
+    if (notifications.length === 0) return;
+    const noteNotifs = notifications.filter(n => n.noteId && !noteDetails.has(n.noteId));
+    if (noteNotifs.length === 0) return;
+    const fetchNoteTitles = async () => {
+      const results = await Promise.all(
+        [...new Set(noteNotifs.map(n => n.noteId!))].map(async (noteId) => {
+          try {
+            const note = await fetchNote(noteId);
+            return { noteId, title: note.title };
+          } catch {
+            return null;
+          }
+        })
+      );
+      setNoteDetails(prev => {
+        const next = new Map(prev);
+        for (const r of results) {
+          if (r) next.set(r.noteId, r.title);
+        }
+        return next;
+      });
+    };
+    fetchNoteTitles();
+  }, [notifications]);
+
+  const handleMarkRead = useCallback(async (notificationId: string) => {
+    try {
+      await markNotificationRead(notificationId);
+      setReadIds(prev => new Set(prev).add(notificationId));
+    } catch (err) {
+      console.error('Failed to mark notification as read:', err);
+    }
+  }, []);
+
+  const handleMarkAllRead = useCallback(async () => {
+    try {
+      await Promise.all(
+        notifications.filter(n => !n.read && !readIds.has(n.id)).map(n => markNotificationRead(n.id))
+      );
+      setReadIds(prev => {
+        const next = new Set(prev);
+        notifications.forEach(n => next.add(n.id));
+        return next;
+      });
+    } catch (err) {
+      console.error('Failed to mark all notifications as read:', err);
+    }
+  }, [notifications, readIds]);
+
+  const unreadCount = notifications.filter(n => !n.read && !readIds.has(n.id)).length;
 
   useEffect(() => {
     fetchStatus()
@@ -77,6 +195,92 @@ export function Home() {
           <p style={s.subtitle}>Engineering Delivery Intelligence Dashboard</p>
         </div>
         <div style={s.headerRight}>
+          <div ref={notificationRef} style={s.notificationBell}>
+            <button style={s.bellButton} onClick={() => setShowNotifications(!showNotifications)}>
+              <Bell size={20} strokeWidth={1.5} color={C.inkMuted} />
+              {unreadCount > 0 && <span style={s.bellBadge}>{unreadCount}</span>}
+            </button>
+            {showNotifications && (
+              <div style={s.notificationDropdown}>
+                <div style={s.notificationHeader}>
+                  <span style={s.notificationTitle}>Notifications</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    {unreadCount > 0 && (
+                      <button style={s.markAllReadBtn} onClick={handleMarkAllRead}>Mark all as read</button>
+                    )}
+                    {notifications.length > 0 && (
+                      <button style={s.viewAllBtn} onClick={() => { setShowNotifications(false); navigate('/notifications'); }}>
+                        View All <ArrowRight size={12} strokeWidth={1.5} style={{ marginLeft: 4 }} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div style={s.notificationList}>
+                  {notifications.length === 0 ? (
+                    <div style={s.notificationEmpty}>No notifications</div>
+                  ) : (
+                    notifications.slice(0, 10).map(notif => {
+                      const isUnread = !notif.read && !readIds.has(notif.id);
+                      const isStatusChange = notif.type === 'status_change' || !notif.type;
+                      const isNoteNotif = !!notif.noteId;
+                      const issueDetail = isStatusChange && notif.issueId ? issueDetails.get(notif.issueId) : null;
+                      const noteTitle = isNoteNotif && notif.noteId ? noteDetails.get(notif.noteId) : null;
+                      const zohoUrl = workspaceName && issueDetail?.projNo && issueDetail?.itemNo
+                        ? `https://sprints.zoho.in/workspace/${workspaceName}#P${issueDetail.projNo}/itemdetails/I${issueDetail.itemNo}`
+                        : null;
+                      return (
+                        <div
+                          key={notif.id}
+                          style={{
+                            ...s.notificationItem,
+                            backgroundColor: isUnread ? `${C.primaryHover}26` : 'transparent',
+                          }}
+                          onClick={() => {
+                            if (isUnread) handleMarkRead(notif.id);
+                            if (isNoteNotif && notif.noteId) {
+                              navigate(`/notes/${notif.noteId}`);
+                            }
+                          }}
+                        >
+                          <div style={s.notificationContent}>
+                            <div style={s.notificationText}>
+                              {isStatusChange ? (
+                                <>
+                                  Issue{' '}
+                                  {zohoUrl ? (
+                                    <a href={zohoUrl} target="_blank" rel="noopener noreferrer" style={s.notificationLink}
+                                      onClick={(e) => { e.stopPropagation(); if (isUnread) handleMarkRead(notif.id); }}>
+                                      #{issueDetail?.itemNo}
+                                    </a>
+                                  ) : (
+                                    <span style={s.notificationIssueId}>#{issueDetail?.itemNo ?? '—'}</span>
+                                  )}
+                                  {' '}status changed: <strong>{notif.oldStatus}</strong> → <strong>{notif.newStatus}</strong>
+                                </>
+                              ) : notif.type === 'deadline_reminder' ? (
+                                <>Deadline reminder: <strong>{noteTitle ?? 'Note'}</strong> — deadline is tomorrow</>
+                              ) : notif.type === 'deadline_day_of' ? (
+                                <>Deadline today: <strong>{noteTitle ?? 'Note'}</strong> — due today</>
+                              ) : notif.type === 'issue_deleted' ? (
+                                <>{notif.message || 'An issue was soft-deleted.'}</>
+                              ) : (
+                                <>{notif.message || 'Notification'}</>
+                              )}
+                            </div>
+                            <div style={s.notificationTime}>
+                              {new Date(notif.createdAt).toLocaleString('en-US', {
+                                month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
           <SyncButton onClick={handleSyncAll} label="Sync All" />
           <StatusBadge connected={statusLoading ? null : (status?.connected ?? false)} />
         </div>
@@ -147,29 +351,24 @@ export function Home() {
             title="Activity"
             subtitle="Watchlist, notes & deadlines"
             accentColor="#f59e0b"
-            icon={<Bell size={20} strokeWidth={1.5} color="#f59e0b" />}
+            icon={<Activity size={20} strokeWidth={1.5} color="#f59e0b" />}
             onClick={() => navigate('/activity')}
           >
             {activity === null && <p style={s.muted}>Loading…</p>}
             {activity !== null && (
               <div style={s.countRow}>
-                {activity.unreadNotifications > 0 ? (
+                {activity.upcomingDeadlines > 0 ? (
                   <>
-                    <span style={{ ...s.count, color: '#f59e0b' }}>{activity.unreadNotifications}</span>
-                    <span style={s.countLabel}>unread notification{activity.unreadNotifications !== 1 ? 's' : ''}</span>
+                    <span style={{ ...s.count, color: '#f59e0b' }}>{activity.upcomingDeadlines}</span>
+                    <span style={s.countLabel}>upcoming deadline{activity.upcomingDeadlines !== 1 ? 's' : ''}</span>
                   </>
                 ) : (
                   <>
                     <CheckCircle size={24} strokeWidth={1.5} color={C.success} />
-                    <span style={s.countLabel}>all caught up</span>
+                    <span style={s.countLabel}>no upcoming deadlines</span>
                   </>
                 )}
               </div>
-            )}
-            {activity !== null && activity.upcomingDeadlines > 0 && (
-              <p style={s.deadlineHint}>
-                {activity.upcomingDeadlines} upcoming deadline{activity.upcomingDeadlines !== 1 ? 's' : ''}
-              </p>
             )}
           </DashboardCard>
         </div>
@@ -233,11 +432,130 @@ const s: Record<string, React.CSSProperties> = {
   count:     { fontSize: 32, fontWeight: 700, lineHeight: 1, fontFamily: font.display, letterSpacing: '-0.6px' },
   countLabel:{ fontSize: 14, color: C.inkSubtle, fontFamily: font.text },
   syncPrompt:{ fontSize: 15, color: C.inkMuted, margin: '0 0 6px', fontFamily: font.text },
-  deadlineHint: { fontSize: 13, color: '#f59e0b', margin: '8px 0 0', fontFamily: font.text },
   row:   { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px solid ${C.hairline}` },
   label: { fontSize: 14, color: C.inkSubtle, fontFamily: font.text },
   value: { fontSize: 14, color: C.inkMuted, fontWeight: 500, fontFamily: font.text },
   muted: { color: C.inkTertiary, fontSize: 14, margin: 0, fontFamily: font.text },
   errorText: { color: '#ef4444', fontSize: 14, margin: '0 0 8px', fontFamily: font.text },
   code: { backgroundColor: C.surface2, padding: '2px 6px', borderRadius: R.xs, fontSize: 13, color: C.primaryHover, fontFamily: font.mono },
+  notificationBell: {
+    position: 'relative' as const,
+  },
+  bellButton: {
+    background: 'none',
+    border: 'none',
+    fontSize: 24,
+    cursor: 'pointer',
+    position: 'relative' as const,
+    padding: 0,
+  },
+  bellBadge: {
+    position: 'absolute' as const,
+    top: -4,
+    right: -4,
+    backgroundColor: C.danger,
+    color: C.inkMuted,
+    fontSize: 10,
+    fontWeight: 700,
+    borderRadius: R.pill,
+    padding: '2px 6px',
+    minWidth: 18,
+    textAlign: 'center' as const,
+  },
+  notificationDropdown: {
+    position: 'absolute' as const,
+    top: '100%',
+    right: 0,
+    marginTop: 8,
+    width: 360,
+    backgroundColor: C.surface1,
+    border: `1px solid ${C.hairline}`,
+    borderRadius: R.md,
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+    zIndex: 100,
+  },
+  notificationHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '12px 16px',
+    borderBottom: `1px solid ${C.hairline}`,
+  },
+  notificationTitle: {
+    fontSize: 14,
+    fontWeight: 600,
+    color: C.inkMuted,
+    fontFamily: font.text,
+  },
+  markAllReadBtn: {
+    background: 'none',
+    border: 'none',
+    color: C.primary,
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    padding: 0,
+    fontFamily: font.text,
+  },
+  notificationList: {
+    maxHeight: 400,
+    overflowY: 'auto' as const,
+  },
+  notificationItem: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: '12px 16px',
+    borderBottom: `1px solid ${C.hairline}`,
+    cursor: 'pointer',
+    transition: 'background-color 0.15s',
+  },
+  notificationContent: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: 4,
+  },
+  notificationText: {
+    fontSize: 13,
+    color: C.inkMuted,
+    lineHeight: 1.4,
+    fontFamily: font.text,
+  },
+  notificationTime: {
+    fontSize: 11,
+    color: C.inkTertiary,
+    fontFamily: font.text,
+  },
+  notificationLink: {
+    color: C.primary,
+    textDecoration: 'none',
+    fontWeight: 600,
+    fontFamily: font.mono,
+    fontSize: 12,
+  },
+  notificationIssueId: {
+    color: C.inkSubtle,
+    fontFamily: font.mono,
+    fontSize: 12,
+  },
+  notificationEmpty: {
+    padding: '24px 16px',
+    textAlign: 'center' as const,
+    color: C.inkTertiary,
+    fontSize: 13,
+    fontFamily: font.text,
+  },
+  viewAllBtn: {
+    background: 'none',
+    border: 'none',
+    color: C.primary,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+    padding: 0,
+    fontFamily: font.text,
+    display: 'flex',
+    alignItems: 'center',
+  },
 };
