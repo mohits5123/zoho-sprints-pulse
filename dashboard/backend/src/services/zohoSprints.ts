@@ -58,6 +58,7 @@ import { recordBurndownSnapshot } from './burndownSnapshots';
 import { zohoThrottle } from './rateLimiter';
 import { startSync, completeSync, touchLastSyncedAt, getSyncMetadata } from './syncStatus';
 import { checkWatchedIssueStatusChanges, checkNoteDeadlineNotifications } from './activitySync';
+import { syncZohoProjects } from './zohoProjects';
 
 
 const SETTINGS_KEY_TEAM_ID = 'zoho_team_id';
@@ -1839,6 +1840,14 @@ export async function runFullSync(): Promise<number> {
   syncInProgress = true;
   try {
     await startSync();
+
+    // Refresh the top-level project table before `syncAll()` reads it.
+    // Without this step, full syncs only process projects that were already
+    // cached in SQLite, so newly created Zoho projects (for example P28)
+    // never become visible in the dashboard. Keeping this in the central
+    // full-sync wrapper covers both the hourly cron and manual sync paths.
+    await syncZohoProjects();
+
     const { synced, sprintIssueCounts, previousSprintIssueCounts, syncedSprintIds } = await syncAll();
     await detectAndRemoveDeletedIssues(zohoThrottle.failed, sprintIssueCounts, previousSprintIssueCounts, syncedSprintIds);
     await touchLastSyncedAt();
